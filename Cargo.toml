@@ -1,0 +1,15 @@
+[package]
+name = "paillier-encryption-halo2"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "paillier_encryption_halo2"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+halo2_proofs = { git = "https://github.com/scroll-tech/halo2.git", branch = "develop" }
+misc-precompiled-circuit = { git = "https://github.com/scroll-tech/misc-precompiled-circuit.git" }
+num-bigint = "0.4.4"
+rand = "0.8.5"
