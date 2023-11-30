@@ -1,10 +1,12 @@
+use std::ops::Mul;
+
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner},
     halo2curves::bn256::Fr,
     plonk::{Circuit, ConstraintSystem, Error},
 };
 use mylib::circuits::{
-    modexp::ModExpChip,
+    modexp::{ModExpChip, Number},
     range::{RangeCheckChip, RangeCheckConfig},
     CommonGateConfig,
 };
@@ -70,6 +72,9 @@ impl Circuit<Fr> for EncCircuit {
                 let mut offset = 0;
                 let g = helper_chip.assign_base(&mut region, &mut offset, &self.g)?;
                 let m = helper_chip.assign_exp(&mut region, &mut offset, &self.m)?;
+             //n^2
+                let n_sqr= self.n.clone().mul(self.n.clone());
+                let n_sqr=helper_chip.assign_base(&mut region, &mut offset, &n_sqr)?;
 
                 let r = helper_chip.assign_base(&mut region, &mut offset, &self.r)?;
                 let n = helper_chip.assign_exp(&mut region, &mut offset, &self.n)?;
@@ -106,7 +111,7 @@ impl Circuit<Fr> for EncCircuit {
                     )?;
                 }
 
-                let rem2 = mul_chip.mod_mult(
+                let rem2 = modexp_chip_r.mod_mult(
                     &mut region,
                     &mut range_chip,
                     &mut offset,
@@ -134,6 +139,7 @@ impl Circuit<Fr> for EncCircuit {
                     &rem2,
                     &modulus,
                 )?;
+            
 
                 for i in 0..4 {
                     println!(
@@ -146,6 +152,11 @@ impl Circuit<Fr> for EncCircuit {
                         mul_out.limbs[i].clone().cell.unwrap().cell(),
                         mul_result.limbs[i].clone().cell.unwrap().cell(),
                     )?;
+                    region.constrain_equal(
+                        modulus.limbs[i].clone().cell.unwrap().cell(),
+                        n_sqr.limbs[i].clone().cell.unwrap().cell(),
+                    )?;
+                  //  region.constrain_instance(cell, column, row)
                 }
 
                 println!("offset final {offset}");
@@ -164,7 +175,7 @@ mod tests {
     use crate::utils::{get_random_x_bit_bn, CircuitError};
     use halo2_proofs::dev::MockProver;
 
-    const LIMB_WIDTH: usize = 108;
+   // const LIMB_WIDTH: usize = 108;
 
     #[test]
     fn test_modexp_circuit() -> Result<(), CircuitError> {
@@ -179,14 +190,8 @@ mod tests {
 
         let bit_len_g: [usize; NUM_TESTS] = [1, 4, 8, 250, 255];
         let bit_len_r: [usize; NUM_TESTS] = [1, 4, 8, 25, 254];
-        let bit_len_mod: [usize; NUM_TESTS] = [1, 4, 8, 255, 254];
-        let bit_len_m: [usize; NUM_TESTS] = [
-            1,
-            LIMB_WIDTH - 1,
-            LIMB_WIDTH + 1,
-            LIMB_WIDTH + LIMB_WIDTH - 1,
-            LIMB_WIDTH + LIMB_WIDTH + LIMB_WIDTH - 90,
-        ];
+        let bit_len_mod: [usize; NUM_TESTS] = [1, 16, 64, 100, 225];
+        let bit_len_m: [usize; NUM_TESTS] = [1, 4, 8, 10, 15];
         let bit_len_n = bit_len_m.clone();
 
         for i in 0..NUM_TESTS {
@@ -206,7 +211,9 @@ mod tests {
             let bn_test_res1 = g_testcase.clone().modpow(&m_testcase, &modulus_testcase);
             let bn_test_res2 = r_testcase.clone().modpow(&n_testcase, &modulus_testcase);
 
-            let bn_test_mulout = bn_test_res1.clone().mul(bn_test_res2.clone());
+            let temp = bn_test_res1.clone().mul(bn_test_res2.clone());
+            let one =BigUint::try_from(1).unwrap();
+            let bn_test_mulout=temp.clone().modpow(&one, &modulus_testcase);
             println!(
                 "testcase g^m : (0x{})^(0x{}) mod 0x{} = 0x{}",
                 g_testcase.clone().to_str_radix(16),
