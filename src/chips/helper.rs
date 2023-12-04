@@ -89,6 +89,7 @@ impl HelperChip {
             cells.push(Some(c));
             *offset += 1;
         }
+        
         let n = Number {
             limbs: [
                 Limb::new(cells[0].clone(), n.limbs[0].value),
