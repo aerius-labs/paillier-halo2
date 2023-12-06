@@ -3,15 +3,15 @@
 //!
 //! The circuit layout is as follows:
 #[rustfmt::skip]
-// | q_step | col0      | col1      | col2      | col3      |
+// | col0   | col1      | col2      | col3      | instance      |
 // |--------|-----------|-----------|-----------|-----------|
-// | 1      | a_limb0   | a_limb1   | a_limb2   | a_limb3   |
-// | 0      | b_limb0   | b_limb1   | b_limb2   | b_limb3   |
-// | 0      | c_lo      | c_hi      | d_lo      | d_hi      |
-// | 0      | carry_lo0 | carry_lo1 | carry_lo2 | carry_lo3 |
-// | 0      | carry_lo4 | -         | -         | -         |
-// | 0      | carry_hi0 | carry_hi1 | carry_hi2 | carry_hi3 |
-// | 0      | carry_hi4 | -         | -         | -         |
+// | q_limb0| q_limb1   | q_limb2   | q_limb3   | q_limb0   |
+// | m_limb0| m_limb1   | m_limb2   | m_limb3   | q_limb1   |
+// | q_m0   | q_m1      | q_m2      | q_m3      | q_limb2   |
+// | r_limb0| r_limb1   | r_limb2   | r_limb3   | q_limb3   |
+// | n_limb0| n_limb1   | n_limb2   | n_limb3   | fin_out0  |
+// | r_n0   | r_n1      | r_n2      | r_n3      | fin_out1  |
+// | fin_out| fin_out1  | fin_out2  | fin_out3  | fin_out2  |
 // | 0      | -         | -         | -         | -         |
 // |--------|-----------|-----------|-----------|-----------|
 // last row is padding to fit in 8 rows range_check_64 chip
@@ -52,21 +52,14 @@ pub struct PallEncChip<F: Field> {
     config: PallEncConfig,
     _marker: PhantomData<F>,
 }
-pub fn from_bn_to_value(bn: &BigUint) -> [Value<Fr>; 4] {
-    let limb0 = bn.modpow(&BigUint::from(1u128), &BigUint::from(1u128 << 108));
-    let limb1 = (bn - limb0.clone()).div(
-        BigUint::from(1u128 << 108).modpow(&BigUint::from(1u128), &BigUint::from(1u128 << 108)),
-    );
-    let limb2 = bn
-        .div(BigUint::from(1u128 << 108))
-        .div(BigUint::from(1u128 << 108));
-    let native = bn % (field_to_bn(&(-Fr::one())) + BigUint::from(1u128));
 
+pub fn from_bn_to_value(bn: &BigUint) -> [Value<Fr>; 4] {
+    let x: Number<Fr> = Number::from_bn(bn);
     [
-        Value::known(bn_to_field(&limb0)),
-        Value::known(bn_to_field(&limb1)),
-        Value::known(bn_to_field(&limb2)),
-        Value::known(bn_to_field(&native)),
+        Value::known(x.limbs[0].value),
+        Value::known(x.limbs[1].value),
+        Value::known(x.limbs[2].value),
+        Value::known(x.limbs[3].value),
     ]
 }
 
@@ -103,17 +96,6 @@ impl PallEncChip<Fr> {
             helper_config: HelperChip::configure(meta),
             range_check,
         }
-
-        // PallEncConfig {
-        //     col_i:[ col_0,
-        //      col_1,
-        //      col_2,
-        //      col_3],
-        //     instance:instance,
-        //     range_chech,
-        //     modexp_config: ModExpChip::<Fr>::configure(meta, &range_check),
-        //     helper_config: HelperChip::configure(meta),
-        // }
     }
 
     pub fn load_private(
@@ -134,7 +116,6 @@ impl PallEncChip<Fr> {
         mut layouter: impl Layouter<Fr>,
         row: usize,
         i: usize,
-        input: Value<Fr>,
     ) -> Result<AssignedCell<Fr, Fr>, Error> {
         layouter.assign_region(
             || "load from instance to advice",
@@ -160,17 +141,6 @@ impl PallEncChip<Fr> {
     }
 }
 
-//#[derive(Default)]
-// struct PallEncCircuit<Fr> {
-//     g: Vec<Value<Fr>>,
-//     m: Vec<Value<Fr>>,
-//     r: Vec<Value<Fr>>,
-//     n: Vec<Value<Fr>>,
-//     modulus: Vec<Value<Fr>>,
-//     bn_test_res1: Vec<Value<Fr>>,
-//     bn_test_res2: Vec<Value<Fr>>,
-//     bn_test_mulout: Vec<Value<Fr>>,
-// }
 #[derive(Default)]
 struct PallEncCircuit {
     g: BigUint,
@@ -178,9 +148,6 @@ struct PallEncCircuit {
     r: BigUint,
     n: BigUint,
     modulus: BigUint,
-    bn_test_res1: BigUint,
-    bn_test_res2: BigUint,
-    bn_test_mulout: BigUint,
 }
 
 impl Circuit<Fr> for PallEncCircuit {
@@ -212,7 +179,6 @@ impl Circuit<Fr> for PallEncCircuit {
 
         let mul_chip = ModExpChip::<Fr>::new(chip.config.modexp_config.clone());
 
-        let helper_chip = HelperChip::new(chip.config.helper_config.clone());
         let mut range_chip = RangeCheckChip::<Fr>::new(chip.config.range_check.clone());
 
         let g_num: Number<Fr> = Number::from_bn(&self.g);
@@ -234,14 +200,14 @@ impl Circuit<Fr> for PallEncCircuit {
                     g_cell.push(region.assign_advice_from_instance(
                         || "Load g from instance to row0",
                         config.instance,
-                        0,
+                        i,
                         config.col_i[i],
-                        0,
+                        offset,
                     )?);
                     m_cell.push(region.assign_advice(
                         || "Load m into row1",
                         config.col_i[i],
-                        0,
+                        offset + 1,
                         || input_m[i],
                     )?);
                 }
@@ -261,15 +227,25 @@ impl Circuit<Fr> for PallEncCircuit {
                         .assign_advice(
                             || "load g^m",
                             config.col_i[i],
-                            0,
+                            offset + 2,
                             || Value::known(gm.limbs[i].clone().value),
                         )
                         .unwrap();
                 }
 
                 for i in 0..4 {
-                    region.assign_advice(|| "load r", config.col_i[i], 0, || input_r[i])?;
-                    region.assign_advice(|| "load n", config.col_i[i], 0, || input_n[i])?;
+                    region.assign_advice(
+                        || "load r",
+                        config.col_i[i],
+                        offset + 3,
+                        || input_r[i],
+                    )?;
+                    region.assign_advice(
+                        || "load n",
+                        config.col_i[i],
+                        offset + 4,
+                        || input_n[i],
+                    )?;
                 }
                 let rn = rn_chip.mod_exp(
                     &mut region,
@@ -284,7 +260,7 @@ impl Circuit<Fr> for PallEncCircuit {
                     region.assign_advice(
                         || "load r^n",
                         config.col_i[i],
-                        offset,
+                        offset + 5,
                         || Value::known(rn.limbs[i].clone().value),
                     )?;
                 }
@@ -302,7 +278,7 @@ impl Circuit<Fr> for PallEncCircuit {
                     final_out_cell.push(region.assign_advice(
                         || "load final out",
                         config.col_i[i],
-                        offset,
+                        offset + 6,
                         || Value::known(mul_out.limbs[i].clone().value),
                     )?);
                 }
@@ -318,30 +294,144 @@ impl Circuit<Fr> for PallEncCircuit {
             )?;
         }
         Ok(())
+    }
+}
+mod tests {
 
-        // for i in 0..4{
-        //     g_val.push(chip.load_from_instance(layouter, 0, i, self.g[i].clone())?);
-        // }
-        // let mut m_val:Vec<AssignedCell<Fr,Fr>>=vec![];
-        // for i in 0..4{
-        //   m_val.push(chip.load_private(layouter, self.m[i].clone(), i)?);
-        // }
-        // let gm_chip = ModExpChip::<Fr>::new(config.clone().modexp_config);
-        // // let n = Number {
-        // //     limbs: [
-        // //         Limb::new(g_val[0].clone(), self.g[1]),
-        // //         Limb::new(g_val[1].clone(), self.g[2].clone()),
-        // //         Limb::new(g_val[2].clone(), self.g[3].clone()),
-        // //         Limb::new(g_val[3].clone(), self.g[4].clone()),
-        // //     ],
-        // // };
-        // let mut r_val:Vec<AssignedCell<Fr,Fr>>=vec![];
-        // for i in 0..4{
-        //     r_val.push(chip.load_private(layouter, self.r[i].clone(), i)?);
-        // }
-        // let mut n_val:Vec<AssignedCell<Fr,Fr>>=vec![];
-        // for i in 0..4{
-        //   n_val.push(chip.load_private(layouter, self.n[i].clone(), i)?);
-        // }
+    use std::ops::{Div, Mul};
+
+    use super::{from_bn_to_value, PallEncCircuit};
+
+    use crate::utils::{get_random_x_bit_bn, CircuitError};
+    use halo2_proofs::{
+        arithmetic::{Field, FieldExt},
+        circuit::{AssignedCell, Layouter, Region, SimpleFloorPlanner},
+        halo2curves::{bn256::Fr, group::ff::PrimeField},
+        plonk::{
+            Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, Instance,
+            TableColumn, VirtualCells,
+        },
+        poly::Rotation,
+    };
+    use halo2_proofs::{circuit::Value, dev::MockProver};
+    use mylib::circuits::modexp::Number;
+    use mylib::utils::{bn_to_field, field_to_bn};
+    use num_bigint::BigUint;
+
+    fn from_bn_to_fr(bn: &BigUint) -> [Fr; 4] {
+        let limb0 = bn.modpow(&BigUint::from(1u128), &BigUint::from(1u128 << 108));
+        println!("0");
+
+        let limb1 = (bn - limb0.clone()).div(
+            BigUint::from(1u128 << 108).modpow(&BigUint::from(1u128), &BigUint::from(1u128 << 108)),
+        );
+        println!("1");
+        let limb2 = bn
+            .div(BigUint::from(1u128 << 108))
+            .div(BigUint::from(1u128 << 108));
+        let native = bn % (field_to_bn(&(-Fr::one())) + BigUint::from(1u128));
+
+        let l0: Fr = bn_to_field(&limb0);
+        let l1: Fr = bn_to_field(&limb1);
+        let l2: Fr = bn_to_field(&limb2);
+        let l3: Fr = bn_to_field(&native);
+
+        [l0, l1, l2, l3]
+    }
+
+    #[test]
+    fn test_enc_chip() {
+        const NUM_TESTS: usize = 5;
+
+        let mut bn_g_test_vectors: Vec<BigUint> = Vec::with_capacity(NUM_TESTS);
+        let mut bn_r_test_vectors: Vec<BigUint> = Vec::with_capacity(NUM_TESTS);
+
+        let mut bn_modulus_test_vectors: Vec<BigUint> = Vec::with_capacity(NUM_TESTS);
+        let mut bn_m_test_vectors: Vec<BigUint> = Vec::with_capacity(NUM_TESTS);
+        let mut bn_n_test_vectors: Vec<BigUint> = Vec::with_capacity(NUM_TESTS);
+
+        let bit_len_g: [usize; NUM_TESTS] = [10, 14, 8, 250, 255];
+        let bit_len_r: [usize; NUM_TESTS] = [10, 14, 8, 25, 254];
+        let bit_len_n: [usize; NUM_TESTS] = [10, 16, 40, 50, 60];
+        let bit_len_m: [usize; NUM_TESTS] = [10, 14, 8, 10, 15];
+
+        for i in 0..NUM_TESTS {
+            bn_g_test_vectors.push(get_random_x_bit_bn(bit_len_g[i]));
+            bn_n_test_vectors.push(get_random_x_bit_bn(bit_len_n[i]));
+            bn_modulus_test_vectors.push(
+                bn_n_test_vectors[i]
+                    .clone()
+                    .mul(bn_n_test_vectors[i].clone()),
+            );
+            bn_m_test_vectors.push(get_random_x_bit_bn(bit_len_m[i]));
+            bn_r_test_vectors.push(get_random_x_bit_bn(bit_len_r[i]));
+        }
+
+        for i in 0..NUM_TESTS {
+            let g_testcase = bn_g_test_vectors[i].clone();
+            let modulus_testcase = bn_modulus_test_vectors[i].clone();
+            let m_testcase = bn_m_test_vectors[i].clone();
+            let r_testcase = bn_r_test_vectors[i].clone();
+            let n_testcase = bn_n_test_vectors[i].clone();
+            let bn_test_res1 = g_testcase.clone().modpow(&m_testcase, &modulus_testcase);
+            let bn_test_res2 = r_testcase.clone().modpow(&n_testcase, &modulus_testcase);
+
+            let temp = bn_test_res1.clone().mul(bn_test_res2.clone());
+            let one = BigUint::try_from(1).unwrap();
+            let bn_test_mulout = temp.clone().modpow(&one, &modulus_testcase);
+
+            println!(
+                "testcase g^m *r^n mod n^2 : (0x{})^(0x{}) mod 0x{} = 0x{}",
+                bn_test_res1.clone().to_str_radix(16),
+                bn_test_res2.clone().to_str_radix(16),
+                modulus_testcase.clone().to_str_radix(16),
+                bn_test_mulout.clone().to_str_radix(16)
+            );
+
+            let g = g_testcase.clone();
+            let m = m_testcase.clone();
+            let r = r_testcase.clone();
+            let n = n_testcase.clone();
+            let modulus = modulus_testcase.clone();
+
+            let g_fr: Number<Fr> = Number::from_bn(&g);
+            let final_fr: Number<Fr> = Number::from_bn(&bn_test_mulout);
+
+            let mut public_input: Vec<Fr> = vec![];
+            public_input.extend(
+                [
+                    g_fr.limbs[0].value,
+                    g_fr.limbs[1].value,
+                    g_fr.limbs[2].value,
+                    g_fr.limbs[3].value,
+                ]
+                .iter(),
+            );
+            public_input.extend(
+                [
+                    final_fr.limbs[0].value,
+                    final_fr.limbs[1].value,
+                    final_fr.limbs[2].value,
+                    final_fr.limbs[3].value,
+                ]
+                .iter(),
+            );
+
+            println!("public inputs {:?}", public_input);
+            //  print!("g vvalue {:?}",g_fr);
+            //    print!("final_fr vvalue {:?}",final_fr);
+
+            let test_circuit = PallEncCircuit {
+                g,
+                m,
+                r,
+                n,
+                modulus,
+            };
+
+            let prover =
+                MockProver::run(20, &test_circuit, vec![public_input.to_vec().clone()]).unwrap();
+            prover.assert_satisfied();
+        }
     }
 }
