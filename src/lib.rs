@@ -1,2 +1,2 @@
-pub mod biguint;
+pub mod big_uint;
 pub mod paillier;
