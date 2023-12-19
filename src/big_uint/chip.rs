@@ -1,10 +1,11 @@
 use halo2_base::{
     utils::{ BigPrimeField, decompose_biguint },
-    gates::{ RangeChip, RangeInstructions },
+    gates::{ RangeChip, RangeInstructions, GateInstructions },
     Context,
     halo2_proofs::{ circuit::Value, plonk::Error },
+    AssignedValue,
 };
-use halo2_ecc::bigint::{ OverflowInteger, mul_no_carry };
+use halo2_ecc::bigint::{ OverflowInteger, mul_no_carry, big_is_zero, ProperUint, big_is_equal };
 use num_bigint::BigUint;
 
 use super::{ AssignedBigUint, Fresh, Muled };
@@ -59,6 +60,7 @@ impl<F: BigPrimeField> BigUintChip<F> {
         Ok(AssignedBigUint::new(int, Value::known(value.clone())))
     }
 
+    // TODO - check if can remove this
     pub fn assign_constant(
         &self,
         ctx: &mut Context<F>,
@@ -69,6 +71,47 @@ impl<F: BigPrimeField> BigUintChip<F> {
         let assigned_limbs = ctx.assign_witnesses(limbs);
         let int = OverflowInteger::new(assigned_limbs, self.limb_bits);
         Ok(AssignedBigUint::new(int, Value::known(value.clone())))
+    }
+
+    /// Returns an assigned bit representing whether `a` is zero or not.
+    fn is_zero(
+        &self,
+        ctx: &mut Context<F>,
+        a: &AssignedBigUint<F, Fresh>
+    ) -> Result<AssignedValue<F>, Error> {
+        let out = big_is_zero::positive(self.range.gate(), ctx, a.int.clone());
+        Ok(out)
+    }
+
+    /// Returns an assigned bit representing whether `a` and `b` are equivalent, whose [`RangeType`] is [`Fresh`].
+    fn is_equal_fresh(
+        &self,
+        ctx: &mut Context<F>,
+        a: &AssignedBigUint<F, Fresh>,
+        b: &AssignedBigUint<F, Fresh>
+    ) -> Result<AssignedValue<F>, Error> {
+        let gate = self.range.gate();
+        let a_limbs = a.int.limbs.clone();
+        let b_limbs = b.int.limbs.clone();
+        assert_eq!(a_limbs.len(), b_limbs.len());
+        let mut partial = gate.is_equal(ctx, a_limbs[0], b_limbs[0]);
+        for (a_limb, b_limb) in a_limbs.iter().zip(b_limbs.iter()) {
+            let eq_limb = gate.is_equal(ctx, *a_limb, *b_limb);
+            partial = gate.and(ctx, eq_limb, partial);
+        }
+        Ok(partial)
+    }
+
+    /// Assert that an assigned bit representing whether `a` and `b` are equivalent, whose [`RangeType`] is [`Fresh`].
+    fn assert_equal_fresh(
+        &self,
+        ctx: &mut Context<F>,
+        a: &AssignedBigUint<F, Fresh>,
+        b: &AssignedBigUint<F, Fresh>
+    ) -> Result<(), Error> {
+        let result = self.is_equal_fresh(ctx, a, b)?;
+        self.range.gate().assert_is_const(ctx, &result, &F::ONE);
+        Ok(())
     }
 
     pub fn mul(
