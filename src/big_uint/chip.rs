@@ -450,7 +450,7 @@ mod test {
 
             c_assigned
                 .value()
-                .zip(Value::known(res.clone()))
+                .zip(res_assigned.value())
                 .map(|(a, b)| {
                     assert_eq!(a, b);
                 });
@@ -466,6 +466,65 @@ mod test {
                 let b = rng.gen_biguint(NUM_BIT_LEN as u64);
                 let res = a.clone() * b.clone();
                 mul_circuit(ctx, chip, NUM_BIT_LEN, LIMB_BIT_LEN, a, b, res);
+            })
+    }
+
+    #[test]
+    fn test_mul_mod() {
+        const NUM_BIT_LEN: usize = 264;
+        const LIMB_BIT_LEN: usize = 88;
+
+        let mut rng = thread_rng();
+
+        fn mul_mod_circuit<F: BigPrimeField>(
+            ctx: &mut Context<F>,
+            range: &RangeChip<F>,
+            num_bit_len: usize,
+            limb_bit_len: usize,
+            a: BigUint,
+            b: BigUint,
+            modulus: BigUint,
+            res: BigUint
+        ) {
+            let chip = BigUintChip::construct(range, limb_bit_len);
+
+            let a_assigned = chip
+                .assign_integer(ctx, Value::known(a.clone()), num_bit_len)
+                .unwrap();
+            let b_assigned = chip
+                .assign_integer(ctx, Value::known(b.clone()), num_bit_len)
+                .unwrap();
+            let modulus_assigned = chip
+                .assign_integer(ctx, Value::known(modulus.clone()), num_bit_len)
+                .unwrap();
+
+            let c_assigned = chip
+                .mul_mod(ctx, &a_assigned, &b_assigned, &modulus_assigned)
+                .unwrap();
+
+            let res_assigned = chip
+                .assign_integer(ctx, Value::known(res.clone()), num_bit_len)
+                .unwrap();
+
+            c_assigned
+                .value()
+                .zip(res_assigned.value())
+                .map(|(a, b)| {
+                    assert_eq!(a, b);
+                });
+            chip.assert_equal_fresh(ctx, &c_assigned, &res_assigned).unwrap();
+        }
+
+        base_test()
+            .k(14)
+            .lookup_bits(13)
+            .expect_satisfied(true)
+            .run(|ctx, chip| {
+                let a = rng.gen_biguint(NUM_BIT_LEN as u64);
+                let b = rng.gen_biguint(NUM_BIT_LEN as u64);
+                let modulus = rng.gen_biguint(NUM_BIT_LEN as u64);
+                let res = (a.clone() * b.clone()) % modulus.clone();
+                mul_mod_circuit(ctx, chip, NUM_BIT_LEN, LIMB_BIT_LEN, a, b, modulus, res);
             })
     }
 }
