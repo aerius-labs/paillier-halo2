@@ -1,12 +1,12 @@
 use halo2_base::{
-    utils::{ BigPrimeField, decompose_biguint, fe_to_biguint, biguint_to_fe },
-    gates::{ RangeChip, RangeInstructions, GateInstructions },
-    Context,
+    gates::{ GateInstructions, RangeChip, RangeInstructions },
     halo2_proofs::{ circuit::Value, plonk::Error },
+    utils::{ biguint_to_fe, decompose_biguint, fe_to_biguint, BigPrimeField },
     AssignedValue,
+    Context,
     QuantumCell,
 };
-use halo2_ecc::bigint::{ OverflowInteger, mul_no_carry, big_is_zero };
+use halo2_ecc::bigint::{ big_is_zero, mul_no_carry, OverflowInteger };
 use num_bigint::BigUint;
 
 use super::{ AssignedBigUint, Fresh, Muled, RefreshAux };
@@ -44,21 +44,34 @@ impl<'a, F: BigPrimeField> BigUintChip<'a, F> {
         num_limbs
     }
 
+    /// Returns the maximum limb size of [`Muled`] type integers.
+    fn compute_muled_limb_max(limb_width: usize, min_n: usize) -> BigUint {
+        let one = BigUint::from(1usize);
+        let out_base = BigUint::from(1usize) << limb_width;
+        BigUint::from(min_n) * (&out_base - &one) * (&out_base - &one) + (&out_base - &one)
+    }
+
     pub fn assign_integer(
         &self,
         ctx: &mut Context<F>,
-        value: BigUint,
+        value: Value<BigUint>,
         bit_len: usize
     ) -> Result<AssignedBigUint<F, Fresh>, Error> {
         assert_eq!(bit_len % self.limb_bits, 0);
         let num_limbs = bit_len / self.limb_bits;
-        let limbs = decompose_biguint::<F>(&value, num_limbs, self.limb_bits);
-        let assigned_limbs = ctx.assign_witnesses(limbs);
+        let limbs = value
+            .as_ref()
+            .map(|v| decompose_biguint::<F>(v, num_limbs, self.limb_bits))
+            .transpose_vec(num_limbs);
+        let mut assigned_limbs = Vec::new();
+        for limb in limbs.iter() {
+            limb.map(|l| assigned_limbs.push(ctx.load_witness(l)));
+        }
         for limb in assigned_limbs.iter() {
             self.range().range_check(ctx, *limb, self.limb_bits);
         }
         let int = OverflowInteger::new(assigned_limbs, self.limb_bits);
-        Ok(AssignedBigUint::new(int, Value::known(value.clone())))
+        Ok(AssignedBigUint::new(int, value.clone()))
     }
 
     // TODO - check if can remove this
@@ -101,6 +114,98 @@ impl<'a, F: BigPrimeField> BigUintChip<'a, F> {
             partial = gate.and(ctx, eq_limb, partial);
         }
         Ok(partial)
+    }
+
+    /// Returns an assigned bit representing whether `a` and `b` are equivalent, whose [`RangeType`] is [`Muled`].
+    pub fn is_equal_muled(
+        &self,
+        ctx: &mut Context<F>,
+        a: &AssignedBigUint<F, Muled>,
+        b: &AssignedBigUint<F, Muled>,
+        num_limbs_l: usize,
+        num_limbs_r: usize
+    ) -> Result<AssignedValue<F>, Error> {
+        // The following constraints are designed with reference to EqualWhenCarried template in https://github.com/jacksoom/circom-bigint/blob/master/circuits/mult.circom.
+        // We use lookup tables to optimize range checks.
+        let min_n = if num_limbs_r >= num_limbs_l { num_limbs_l } else { num_limbs_r };
+        // Each limb of `a` and `b` is less than `min_n * (1^(limb_bits) - 1)^2  + (1^(limb_bits) - 1)`.
+        let muled_limb_max = Self::compute_muled_limb_max(self.limb_bits, min_n);
+        let muled_limb_max_fe = biguint_to_fe::<F>(&muled_limb_max);
+        let num_limbs = num_limbs_l + num_limbs_r - 1;
+        let muled_limb_max_bits = Self::bits_size(&(&muled_limb_max * 2u32));
+        let carry_bits = muled_limb_max_bits - self.limb_bits;
+        let gate = self.range.gate();
+        let range = self.range();
+
+        // The naive approach is to subtract the two integers limb by limb and:
+        //  a. Verify that they sum to zero along the way while
+        //  b. Propagating carries
+        // but this doesn't work because early sums might be negative.
+        // So instead we verify that `a - b + word_max = word_max`.
+        let limb_max = BigUint::from(1u64) << self.limb_bits;
+        let zero = ctx.load_zero();
+        let mut accumulated_extra = zero.clone();
+        let mut carry = Vec::with_capacity(num_limbs);
+        let mut cs = Vec::with_capacity(num_limbs);
+        carry.push(zero.clone());
+        let mut eq_bit = ctx.load_constant(F::ONE);
+        let a_limbs = a.limbs();
+        let b_limbs = b.limbs();
+        for i in 0..num_limbs {
+            // `sum = a - b + word_max`
+            let a_b_sub = gate.sub(
+                ctx,
+                QuantumCell::Existing(a_limbs[i]),
+                QuantumCell::Existing(b_limbs[i])
+            );
+            let sum = gate.sum(
+                ctx,
+                vec![
+                    QuantumCell::Existing(a_b_sub),
+                    QuantumCell::Existing(carry[i]),
+                    QuantumCell::Constant(muled_limb_max_fe)
+                ]
+            );
+            // `c` is lower `self.limb_width` bits of `sum`.
+            // `new_carry` is any other upper bits.
+            let (new_carry, c) = self.div_mod_unsafe(ctx, &sum, &limb_max);
+            carry.push(new_carry);
+            cs.push(c);
+
+            // `accumulated_extra` is the sum of `word_max`.
+            accumulated_extra = gate.add(
+                ctx,
+                QuantumCell::Existing(accumulated_extra),
+                QuantumCell::Constant(muled_limb_max_fe)
+            );
+            let (q_acc, mod_acc) = self.div_mod_unsafe(ctx, &accumulated_extra, &limb_max);
+            // If and only if `a` is equal to `b`, lower `self.limb_width` bits of `sum` and `accumulated_extra` are the same.
+            let cs_acc_eq = gate.is_equal(
+                ctx,
+                QuantumCell::Existing(cs[i]),
+                QuantumCell::Existing(mod_acc)
+            );
+            eq_bit = gate.and(ctx, QuantumCell::Existing(eq_bit), QuantumCell::Existing(cs_acc_eq));
+            accumulated_extra = q_acc;
+
+            if i < num_limbs - 1 {
+                // Assert that each carry fits in `carry_bits` bits.
+                range.range_check(ctx, carry[i + 1], carry_bits);
+            } else {
+                // The final carry should match the `accumulated_extra`.
+                let final_carry_eq = gate.is_equal(
+                    ctx,
+                    QuantumCell::Existing(carry[i + 1]),
+                    QuantumCell::Existing(accumulated_extra)
+                );
+                eq_bit = gate.and(
+                    ctx,
+                    QuantumCell::Existing(eq_bit),
+                    QuantumCell::Existing(final_carry_eq)
+                );
+            }
+        }
+        Ok(eq_bit)
     }
 
     /// Assert that an assigned bit representing whether `a` and `b` are equivalent, whose [`RangeType`] is [`Fresh`].
@@ -220,6 +325,79 @@ impl<'a, F: BigPrimeField> BigUintChip<'a, F> {
         gate.assert_is_const(ctx, &is_eq, &F::ONE);
         (q, r)
     }
+
+    /// Given two inputs `a,b` and a modulus `n`, performs the modular multiplication `a * b mod n`.
+    ///
+    /// # Arguments
+    /// * `ctx` - a region context.
+    /// * `a` - input of multiplication.
+    /// * `b` - input of multiplication.
+    /// * `n` - a modulus.
+    ///
+    /// # Return values
+    /// Returns the modular multiplication result `a * b mod n` as [`AssignedInteger<F, Fresh>`].
+    /// # Requirements
+    /// Before calling this function, you must assert that `a<n` and `b<n`.
+    pub fn mul_mod(
+        &self,
+        ctx: &mut Context<F>,
+        a: &AssignedBigUint<F, Fresh>,
+        b: &AssignedBigUint<F, Fresh>,
+        n: &AssignedBigUint<F, Fresh>
+    ) -> Result<AssignedBigUint<F, Fresh>, Error> {
+        // The following constraints are designed with reference to AsymmetricMultiplierReducer template in https://github.com/jacksoom/circom-bigint/blob/master/circuits/mult.circom.
+        // However, we do not regroup multiple limbs like the circom-bigint implementation because addition is not free, i.e., it makes constraints as well as multiplication, in the Plonk constraints system.
+        // Besides, we use lookup tables to optimize range checks.
+        let limb_bits = self.limb_bits;
+        let n1 = a.num_limbs();
+        let n2 = b.num_limbs();
+        assert_eq!(n1, n.num_limbs());
+        let (a_big, b_big, n_big) = (a.value(), b.value(), n.value());
+        // 1. Compute the product as `BigUint`.
+        let full_prod_big = a_big * b_big;
+        // 2. Compute the quotient and remainder when the product is divided by `n`.
+        let (q_big, prod_big) = full_prod_big
+            .zip(n_big.as_ref())
+            .map(|(full_prod, n)| (&full_prod / n, &full_prod % n))
+            .unzip();
+
+        // 3. Assign the quotient and remainder after checking the range of each limb.
+        let assign_q = self.assign_integer(ctx, q_big, n2 * limb_bits)?;
+        let assign_n = self.assign_integer(ctx, n_big, n1 * limb_bits)?;
+        let assign_prod = self.assign_integer(ctx, prod_big, n1 * limb_bits)?;
+        // 4. Assert `a * b = quotient_int * n + prod_int`, i.e., `prod_int = (a * b) mod n`.
+        let ab = self.mul(ctx, a, b)?;
+        let qn = self.mul(ctx, &assign_q, &assign_n)?;
+        let gate = self.range.gate();
+        let n_sum = n1 + n2;
+        let qn_prod = {
+            let value = qn.value
+                .as_ref()
+                .zip(assign_prod.value.as_ref())
+                .map(|(a, b)| a + b);
+            let mut limbs = Vec::with_capacity(n1 + n2 - 1);
+            let qn_limbs = qn.limbs();
+            let prod_limbs = assign_prod.limbs();
+            for i in 0..n_sum - 1 {
+                if i < n1 {
+                    limbs.push(
+                        gate.add(
+                            ctx,
+                            QuantumCell::Existing(qn_limbs[i]),
+                            QuantumCell::Existing(prod_limbs[i])
+                        )
+                    );
+                } else {
+                    limbs.push(qn_limbs[i].clone());
+                }
+            }
+            let int = OverflowInteger::new(limbs, self.limb_bits);
+            AssignedBigUint::<F, Muled>::new(int, value)
+        };
+        let is_eq = self.is_equal_muled(ctx, &ab, &qn_prod, n1, n2)?;
+        gate.assert_is_const(ctx, &is_eq, &F::ONE);
+        Ok(assign_prod)
+    }
 }
 
 #[cfg(test)]
@@ -227,10 +405,10 @@ mod test {
     use halo2_base::{
         gates::RangeChip,
         halo2_proofs::circuit::Value,
+        utils::{ testing::base_test, BigPrimeField },
         Context,
-        utils::{ BigPrimeField, testing::base_test },
     };
-    use num_bigint::{ RandBigInt, BigUint };
+    use num_bigint::{ BigUint, RandBigInt };
     use rand::thread_rng;
 
     use crate::big_uint::RefreshAux;
@@ -255,14 +433,20 @@ mod test {
         ) {
             let chip = BigUintChip::construct(range, limb_bit_len);
 
-            let a_assigned = chip.assign_integer(ctx, a.clone(), num_bit_len).unwrap();
-            let b_assigned = chip.assign_integer(ctx, b.clone(), num_bit_len).unwrap();
+            let a_assigned = chip
+                .assign_integer(ctx, Value::known(a.clone()), num_bit_len)
+                .unwrap();
+            let b_assigned = chip
+                .assign_integer(ctx, Value::known(b.clone()), num_bit_len)
+                .unwrap();
 
             let c_assigned = chip.mul(ctx, &a_assigned, &b_assigned).unwrap();
             let aux = RefreshAux::new(limb_bit_len, a_assigned.num_limbs(), b_assigned.num_limbs());
             let c_assigned = chip.refresh(ctx, &c_assigned, &aux).unwrap();
 
-            let res_assigned = chip.assign_integer(ctx, res.clone(), num_bit_len * 2).unwrap();
+            let res_assigned = chip
+                .assign_integer(ctx, Value::known(res.clone()), num_bit_len * 2)
+                .unwrap();
 
             c_assigned
                 .value()
