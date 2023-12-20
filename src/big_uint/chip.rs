@@ -305,6 +305,14 @@ impl<'a, F: BigPrimeField> BigUintChip<'a, F> {
         Ok(AssignedBigUint::new(int, value))
     }
 
+    pub fn square(
+        &self,
+        ctx: &mut Context<F>,
+        a: &AssignedBigUint<F, Fresh>
+    ) -> Result<AssignedBigUint<F, Muled>, Error> {
+        self.mul(ctx, a, a)
+    }
+
     pub fn div_mod_unsafe(
         &self,
         ctx: &mut Context<F>,

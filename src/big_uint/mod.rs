@@ -88,7 +88,7 @@ impl<F: BigPrimeField> AssignedBigUint<F, Fresh> {
 }
 
 impl<F: BigPrimeField> AssignedBigUint<F, Muled> {
-    pub(crate) fn to_fresh_unsafe(self) -> AssignedBigUint<F, Fresh> {
+    pub fn to_fresh_unsafe(self) -> AssignedBigUint<F, Fresh> {
         AssignedBigUint::new(self.int, self.value)
     }
 }
