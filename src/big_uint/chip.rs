@@ -398,6 +398,51 @@ impl<'a, F: BigPrimeField> BigUintChip<'a, F> {
         gate.assert_is_const(ctx, &is_eq, &F::ONE);
         Ok(assign_prod)
     }
+
+    /// Given a input `a` and a modulus `n`, performs the modular square `a^2 mod n`.
+    pub fn square_mod(
+        &self,
+        ctx: &mut Context<F>,
+        a: &AssignedBigUint<F, Fresh>,
+        n: &AssignedBigUint<F, Fresh>
+    ) -> Result<AssignedBigUint<F, Fresh>, Error> {
+        self.mul_mod(ctx, a, a, n)
+    }
+
+    /// Given a base `a`, a fixed exponent `e`, and a modulus `n`, performs the modular power `a^e mod n`.
+    pub fn pow_mod_fixed_exp(
+        &self,
+        ctx: &mut Context<F>,
+        a: &AssignedBigUint<F, Fresh>,
+        e: &BigUint,
+        n: &AssignedBigUint<F, Fresh>
+    ) -> Result<AssignedBigUint<F, Fresh>, Error> {
+        let num_limbs = a.num_limbs();
+        assert_eq!(num_limbs, n.num_limbs());
+        let num_e_bits = Self::bits_size(e);
+        // Decompose `e` into bits.
+        let e_bits = e
+            .to_bytes_le()
+            .into_iter()
+            .flat_map(|v| { (0..8).map(|i: u8| ((v >> i) & 1u8) == 1u8).collect::<Vec<bool>>() })
+            .collect::<Vec<bool>>();
+        let e_bits = e_bits[0..num_e_bits].to_vec();
+        let mut acc = self.assign_constant(ctx, BigUint::from(1usize))?;
+        let zero = ctx.load_zero();
+        acc = acc.extend_limbs(num_limbs - acc.num_limbs(), zero);
+        let mut squared: AssignedBigUint<F, Fresh> = a.clone();
+        for e_bit in e_bits.into_iter() {
+            let cur_sq = squared;
+            // Square `squared`.
+            squared = self.square_mod(ctx, &cur_sq, n)?;
+            if !e_bit {
+                continue;
+            }
+            // If `e_bit = 1`, update `acc` to `acc * cur_sq`.
+            acc = self.mul_mod(ctx, &acc, &cur_sq, n)?;
+        }
+        Ok(acc)
+    }
 }
 
 #[cfg(test)]
