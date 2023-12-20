@@ -12,17 +12,17 @@ use num_bigint::BigUint;
 use super::{ AssignedBigUint, Fresh, Muled, RefreshAux };
 
 #[derive(Clone, Debug)]
-pub struct BigUintChip<F: BigPrimeField> {
-    pub range: RangeChip<F>,
+pub struct BigUintChip<'a, F: BigPrimeField> {
+    pub range: &'a RangeChip<F>,
     pub limb_bits: usize,
 }
 
-impl<F: BigPrimeField> BigUintChip<F> {
-    pub fn construct(range: RangeChip<F>, limb_bits: usize) -> Self {
+impl<'a, F: BigPrimeField> BigUintChip<'a, F> {
+    pub fn construct(range: &'a RangeChip<F>, limb_bits: usize) -> Self {
         Self { range, limb_bits }
     }
 
-    pub fn range(&self) -> &RangeChip<F> {
+    pub fn range(&self) -> &'a RangeChip<F> {
         &self.range
     }
 
@@ -225,46 +225,63 @@ impl<F: BigPrimeField> BigUintChip<F> {
 #[cfg(test)]
 mod test {
     use halo2_base::{
-        gates::circuit::{ builder::RangeCircuitBuilder, CircuitBuilderStage },
-        halo2_proofs::{ halo2curves::grumpkin::Fq as Fr, circuit::Value },
+        gates::RangeChip,
+        halo2_proofs::circuit::Value,
+        Context,
+        utils::{ BigPrimeField, testing::base_test },
     };
-    use num_bigint::RandBigInt;
+    use num_bigint::{ RandBigInt, BigUint };
     use rand::thread_rng;
+
+    use crate::big_uint::RefreshAux;
 
     use super::BigUintChip;
 
     #[test]
     fn test_mul() {
-        const NUM_BIT_LEN: usize = 256;
-        const LIMB_BIT_LEN: usize = 64;
+        const NUM_BIT_LEN: usize = 264;
+        const LIMB_BIT_LEN: usize = 88;
 
         let mut rng = thread_rng();
 
-        let mut builder = RangeCircuitBuilder::<Fr>
-            ::from_stage(CircuitBuilderStage::Mock)
-            .use_k(13 as usize)
-            .use_lookup_bits(10);
-        let range = builder.range_chip();
+        fn mul_circuit<F: BigPrimeField>(
+            ctx: &mut Context<F>,
+            range: &RangeChip<F>,
+            num_bit_len: usize,
+            limb_bit_len: usize,
+            a: BigUint,
+            b: BigUint,
+            res: BigUint
+        ) {
+            let chip = BigUintChip::construct(range, limb_bit_len);
 
-        let big_uint_chip = BigUintChip::construct(range, LIMB_BIT_LEN);
+            let a_assigned = chip.assign_integer(ctx, a.clone(), num_bit_len).unwrap();
+            let b_assigned = chip.assign_integer(ctx, b.clone(), num_bit_len).unwrap();
 
-        let ctx = builder.main(0);
+            let c_assigned = chip.mul(ctx, &a_assigned, &b_assigned).unwrap();
+            let aux = RefreshAux::new(limb_bit_len, a_assigned.num_limbs(), b_assigned.num_limbs());
+            let c_assigned = chip.refresh(ctx, &c_assigned, &aux).unwrap();
 
-        let a = rng.gen_biguint(NUM_BIT_LEN as u64);
-        let b = rng.gen_biguint(NUM_BIT_LEN as u64);
+            let res_assigned = chip.assign_integer(ctx, res.clone(), num_bit_len * 2).unwrap();
 
-        let a_assigned = big_uint_chip.assign_integer(ctx, a.clone(), NUM_BIT_LEN).unwrap();
-        let b_assigned = big_uint_chip.assign_integer(ctx, b.clone(), NUM_BIT_LEN).unwrap();
+            c_assigned
+                .value()
+                .zip(Value::known(res.clone()))
+                .map(|(a, b)| {
+                    assert_eq!(a, b);
+                });
+            chip.assert_equal_fresh(ctx, &c_assigned, &res_assigned).unwrap();
+        }
 
-        let c_assigned = big_uint_chip.mul(ctx, &a_assigned, &b_assigned).unwrap();
-
-        let res = a.clone() * b.clone();
-
-        c_assigned
-            .value()
-            .zip(Value::known(res.clone()))
-            .map(|(a, b)| {
-                assert_eq!(a, b);
-            });
+        base_test()
+            .k(13)
+            .lookup_bits(12)
+            .expect_satisfied(true)
+            .run(|ctx, chip| {
+                let a = rng.gen_biguint(NUM_BIT_LEN as u64);
+                let b = rng.gen_biguint(NUM_BIT_LEN as u64);
+                let res = a.clone() * b.clone();
+                mul_circuit(ctx, chip, NUM_BIT_LEN, LIMB_BIT_LEN, a, b, res);
+            })
     }
 }
