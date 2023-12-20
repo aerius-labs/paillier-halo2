@@ -1,14 +1,15 @@
 use halo2_base::{
-    utils::{ BigPrimeField, decompose_biguint },
+    utils::{ BigPrimeField, decompose_biguint, fe_to_biguint, biguint_to_fe },
     gates::{ RangeChip, RangeInstructions, GateInstructions },
     Context,
     halo2_proofs::{ circuit::Value, plonk::Error },
     AssignedValue,
+    QuantumCell,
 };
-use halo2_ecc::bigint::{ OverflowInteger, mul_no_carry, big_is_zero, ProperUint, big_is_equal };
+use halo2_ecc::bigint::{ OverflowInteger, mul_no_carry, big_is_zero };
 use num_bigint::BigUint;
 
-use super::{ AssignedBigUint, Fresh, Muled };
+use super::{ AssignedBigUint, Fresh, Muled, RefreshAux };
 
 #[derive(Clone, Debug)]
 pub struct BigUintChip<F: BigPrimeField> {
@@ -74,7 +75,7 @@ impl<F: BigPrimeField> BigUintChip<F> {
     }
 
     /// Returns an assigned bit representing whether `a` is zero or not.
-    fn is_zero(
+    pub fn is_zero(
         &self,
         ctx: &mut Context<F>,
         a: &AssignedBigUint<F, Fresh>
@@ -84,7 +85,7 @@ impl<F: BigPrimeField> BigUintChip<F> {
     }
 
     /// Returns an assigned bit representing whether `a` and `b` are equivalent, whose [`RangeType`] is [`Fresh`].
-    fn is_equal_fresh(
+    pub fn is_equal_fresh(
         &self,
         ctx: &mut Context<F>,
         a: &AssignedBigUint<F, Fresh>,
@@ -103,7 +104,7 @@ impl<F: BigPrimeField> BigUintChip<F> {
     }
 
     /// Assert that an assigned bit representing whether `a` and `b` are equivalent, whose [`RangeType`] is [`Fresh`].
-    fn assert_equal_fresh(
+    pub fn assert_equal_fresh(
         &self,
         ctx: &mut Context<F>,
         a: &AssignedBigUint<F, Fresh>,
@@ -112,6 +113,67 @@ impl<F: BigPrimeField> BigUintChip<F> {
         let result = self.is_equal_fresh(ctx, a, b)?;
         self.range.gate().assert_is_const(ctx, &result, &F::ONE);
         Ok(())
+    }
+
+    pub fn refresh(
+        &self,
+        ctx: &mut Context<F>,
+        a: &AssignedBigUint<F, Muled>,
+        aux: &RefreshAux
+    ) -> Result<AssignedBigUint<F, Fresh>, Error> {
+        let gate = self.range.gate();
+
+        // For converting `a` to a [`Fresh`] type integer, we decompose each limb of `a` into `self.limb_width`-bits values.
+        assert_eq!(self.limb_bits, aux.limb_bits);
+        // The i-th value of `aux.increased_limbs_vec` represents the number of increased values when converting i-th limb of `a` into `self.limb_width`-bits values.
+        let increased_limbs_vec = aux.increased_limbs_vec.clone();
+        let num_limbs_l = aux.num_limbs_l;
+        let num_limbs_r = aux.num_limbs_r;
+        // The following assertion holds since `a` is the product of two integers `l` and `r` whose number of limbs is `num_limbs_l` and `num_limbs_r`, respectively.
+        assert_eq!(a.num_limbs(), num_limbs_l + num_limbs_r - 1);
+        let num_limbs_fresh = increased_limbs_vec.len();
+
+        let mut refreshed_limbs = Vec::with_capacity(num_limbs_fresh);
+        let zero_assigned = ctx.load_zero();
+        let a_limbs = a.limbs();
+        for i in 0..a.num_limbs() {
+            refreshed_limbs.push(a_limbs[i].clone());
+        }
+        for _ in 0..num_limbs_fresh - a.num_limbs() {
+            refreshed_limbs.push(zero_assigned.clone());
+        }
+        let limb_max = BigUint::from(1u64) << self.limb_bits;
+        for i in 0..num_limbs_fresh {
+            // `i`-th overflowing limb value.
+            let mut limb = refreshed_limbs[i].clone();
+            for j in 0..increased_limbs_vec[i] + 1 {
+                // `n` is lower `self.limb_width` bits of `limb`.
+                // `q` is any other upper bits.
+                let (q, n) = self.div_mod_unsafe(ctx, &limb, &limb_max);
+                if j == 0 {
+                    // When `j=0`, `n` is a new `i`-th limb value.
+                    refreshed_limbs[i] = n;
+                } else {
+                    // When `j>0`, `n` is carried to the `i+j`-th limb.
+                    refreshed_limbs[i + j] = gate.add(
+                        ctx,
+                        QuantumCell::Existing(refreshed_limbs[i + j]),
+                        QuantumCell::Existing(n)
+                    );
+                }
+                // We use `q` as the next `limb`.
+                limb = q;
+            }
+            // `limb` should be zero because we decomposed all bits of the `i`-th overflowing limb value into `self.limb_width` bits values.
+            gate.assert_is_const(ctx, &limb, &F::ZERO);
+        }
+        let range = self.range();
+        for limb in refreshed_limbs.iter() {
+            range.range_check(ctx, *limb, self.limb_bits);
+        }
+        let int = OverflowInteger::new(refreshed_limbs, self.limb_bits);
+        let new_assigned_int = AssignedBigUint::new(int, a.value());
+        Ok(new_assigned_int)
     }
 
     pub fn mul(
@@ -136,6 +198,27 @@ impl<F: BigPrimeField> BigUintChip<F> {
         );
         let value = a.value.zip(b.value).map(|(a, b)| a * b);
         Ok(AssignedBigUint::new(int, value))
+    }
+
+    pub fn div_mod_unsafe(
+        &self,
+        ctx: &mut Context<F>,
+        a: &AssignedValue<F>,
+        b: &BigUint
+    ) -> (AssignedValue<F>, AssignedValue<F>) {
+        let gate = self.range.gate();
+
+        let a_big = fe_to_biguint(a.value());
+        let (q_big, r_big) = (a_big.clone() / b, a_big.clone() % b);
+
+        let (q_val, r_val) = (biguint_to_fe::<F>(&q_big), biguint_to_fe::<F>(&r_big));
+
+        let (q, r) = (ctx.load_witness(q_val), ctx.load_witness(r_val));
+        let prod = gate.mul(ctx, QuantumCell::Existing(q), QuantumCell::Constant(biguint_to_fe(b)));
+        let a_prod_sub = gate.sub(ctx, QuantumCell::Existing(*a), QuantumCell::Existing(prod));
+        let is_eq = gate.is_equal(ctx, QuantumCell::Existing(r), QuantumCell::Existing(a_prod_sub));
+        gate.assert_is_const(ctx, &is_eq, &F::ONE);
+        (q, r)
     }
 }
 
