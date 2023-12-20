@@ -572,4 +572,58 @@ mod test {
                 mul_mod_circuit(ctx, chip, NUM_BIT_LEN, LIMB_BIT_LEN, a, b, modulus, res);
             })
     }
+
+    #[test]
+    fn test_pow_mod_fixed_exp() {
+        const NUM_BIT_LEN: usize = 264;
+        const LIMB_BIT_LEN: usize = 88;
+
+        let mut rng = thread_rng();
+
+        fn pow_mod_fixed_exp_circuit<F: BigPrimeField>(
+            ctx: &mut Context<F>,
+            range: &RangeChip<F>,
+            num_bit_len: usize,
+            limb_bit_len: usize,
+            a: BigUint,
+            e: BigUint,
+            n: BigUint,
+            res: BigUint
+        ) {
+            let chip = BigUintChip::construct(range, limb_bit_len);
+
+            let a_assigned = chip
+                .assign_integer(ctx, Value::known(a.clone()), num_bit_len)
+                .unwrap();
+            let n_assigned = chip
+                .assign_integer(ctx, Value::known(n.clone()), num_bit_len)
+                .unwrap();
+
+            let c_assigned = chip.pow_mod_fixed_exp(ctx, &a_assigned, &e, &n_assigned).unwrap();
+
+            let res_assigned = chip
+                .assign_integer(ctx, Value::known(res.clone()), num_bit_len)
+                .unwrap();
+
+            c_assigned
+                .value()
+                .zip(res_assigned.value())
+                .map(|(a, b)| {
+                    assert_eq!(a, b);
+                });
+            chip.assert_equal_fresh(ctx, &c_assigned, &res_assigned).unwrap();
+        }
+
+        base_test()
+            .k(15)
+            .lookup_bits(14)
+            .expect_satisfied(true)
+            .run(|ctx, chip| {
+                let a = rng.gen_biguint(NUM_BIT_LEN as u64);
+                let e = rng.gen_biguint(64 as u64); // Choosing a smaller exponent for efficiency
+                let n = rng.gen_biguint(NUM_BIT_LEN as u64);
+                let res = a.modpow(&e, &n);
+                pow_mod_fixed_exp_circuit(ctx, chip, NUM_BIT_LEN, LIMB_BIT_LEN, a, e, n, res);
+            })
+    }
 }
