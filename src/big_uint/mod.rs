@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use halo2_base::{ halo2_proofs::circuit::Value, utils::BigPrimeField, AssignedValue };
+use halo2_base::{halo2_proofs::circuit::Value, utils::BigPrimeField, AssignedValue};
 use halo2_ecc::bigint::OverflowInteger;
 use num_bigint::BigUint;
 
@@ -47,7 +47,7 @@ impl<F: BigPrimeField, T: RangeType> AssignedBigUint<F, T> {
         let pre_num_limbs = self.num_limbs();
         let mut limbs = self.int.limbs.clone();
         for _ in 0..num_extend_limbs {
-            limbs.push(zero_value.clone());
+            limbs.push(zero_value);
         }
         assert_eq!(pre_num_limbs + num_extend_limbs, limbs.len());
         let int = OverflowInteger::new(limbs, max_limb_bits);
@@ -96,7 +96,7 @@ impl<F: BigPrimeField> AssignedBigUint<F, Muled> {
 /// Auxiliary data for refreshing a [`Muled`] type integer to a [`Fresh`] type integer.
 #[derive(Debug, Clone)]
 pub struct RefreshAux {
-    limb_bits: usize, // bit length of limb
+    limb_bits: usize,   // bit length of limb
     num_limbs_l: usize, // limbs of left multiplicand
     num_limbs_r: usize, // limbs of right multiplicand
     increased_limbs_vec: Vec<usize>,
@@ -130,7 +130,7 @@ impl RefreshAux {
             let ls = &l_max[0..=i];
             let rs = &r_max[0..=i];
             let mut sum = BigUint::from(0u64);
-            for (l, r) in ls.into_iter().zip(rs.into_iter().rev()) {
+            for (l, r) in ls.iter().zip(rs.iter().rev()) {
                 sum += l * r;
             }
             muled.push(sum);
