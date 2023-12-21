@@ -70,6 +70,13 @@ impl<'a, F: BigPrimeField> PaillierChip<'a, F> {
     }
 }
 
+pub fn paillier_enc(n: &BigUint, g: &BigUint, m: &BigUint, r: &BigUint) -> BigUint {
+    let n2 = n * n;
+    let gm = g.modpow(m, &n2);
+    let rn = r.modpow(n, &n2);
+    (gm * rn) % n2
+}
+
 #[cfg(test)]
 mod test {
     use halo2_base::{
@@ -81,15 +88,7 @@ mod test {
     use num_bigint::{BigUint, RandBigInt};
     use rand::thread_rng;
 
-    use crate::big_uint::chip::BigUintChip;
-
-    fn paillier_enc(n: &BigUint, g: &BigUint, m: &BigUint, r: &BigUint) -> BigUint {
-        let n2 = n * n;
-        let gm = g.modpow(m, &n2);
-        let rn = r.modpow(n, &n2);
-        let c = (gm * rn) % n2;
-        c
-    }
+    use crate::{big_uint::chip::BigUintChip, paillier::paillier_enc};
 
     #[test]
     fn test_paillier_encryption() {
