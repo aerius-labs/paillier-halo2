@@ -68,6 +68,45 @@ impl<'a, F: BigPrimeField> PaillierChip<'a, F> {
 
         Ok(c)
     }
+    pub fn encrypts_add(
+        &self,
+        ctx: &mut Context<F>,
+        c1:&BigUint,
+        c2:&BigUint,
+    ) -> Result<AssignedBigUint<F, Fresh>, Error> {
+        let mut c1_assigned =
+            self.biguint
+                .assign_integer(ctx, Value::known(c1.clone()), self.enc_bits)?;
+
+       let mut  c2_assigned =
+                self.biguint
+                    .assign_integer(ctx, Value::known(c2.clone()), self.enc_bits)?;
+
+   
+    let n_assigned =
+            self.biguint
+                .assign_integer(ctx, Value::known(self.n.clone()), self.enc_bits)?;
+                let n2 = self.biguint.square(ctx, &n_assigned)?;
+                let aux = RefreshAux::new(
+                    self.biguint.limb_bits,
+                    n_assigned.num_limbs(),
+                    n_assigned.num_limbs(),
+                );
+                let n2 = self.biguint.refresh(ctx, &n2, &aux)?;
+        
+
+
+        let zero_value = ctx.load_zero();
+
+        c1_assigned = c1_assigned.extend_limbs(n2.num_limbs() - c1_assigned.num_limbs(), zero_value);
+        c2_assigned = c2_assigned.extend_limbs(n2.num_limbs() - c2_assigned.num_limbs(), zero_value);
+        let c12 = self.biguint.mul_mod(ctx, &c1_assigned, &c2_assigned, &n2)?;
+
+      
+
+
+        Ok(c12)
+    }
 }
 
 pub fn paillier_enc(n: &BigUint, g: &BigUint, m: &BigUint, r: &BigUint) -> BigUint {
