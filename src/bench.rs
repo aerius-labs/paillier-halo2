@@ -1,11 +1,14 @@
 use halo2_base::{
     gates::{flex_gate::threads::SinglePhaseCoreManager, RangeChip},
-    halo2_proofs::circuit::Value,
+    halo2_proofs::{circuit::Value, plonk::Error},
     utils::BigPrimeField,
 };
 use num_bigint::BigUint;
 
-use crate::{big_uint::chip::BigUintChip, paillier::PaillierChip};
+use crate::{
+    big_uint::{chip::BigUintChip, AssignedBigUint, Fresh, RefreshAux},
+    paillier::PaillierChip,
+};
 
 #[derive(Debug, Clone)]
 pub struct PaillierInputs {
@@ -20,6 +23,7 @@ pub struct PaillierInputs {
 #[derive(Debug, Clone)]
 pub struct PaillierInputsAdd {
     pub limb_bits: usize,
+    pub enc_bits: usize,
     pub n: BigUint,
     pub g: BigUint,
     pub c1: BigUint,
@@ -31,7 +35,7 @@ pub fn paillier_enc_test<F: BigPrimeField>(
     pool: &mut SinglePhaseCoreManager<F>,
     range: &RangeChip<F>,
     inputs: PaillierInputs,
-) {
+) -> Result<AssignedBigUint<F, Fresh>, Error> {
     let ctx = pool.main();
     let biguint_chip = BigUintChip::construct(range, inputs.limb_bits);
     let paillier_chip =
@@ -49,34 +53,41 @@ pub fn paillier_enc_test<F: BigPrimeField>(
     biguint_chip
         .assert_equal_fresh(ctx, &c_assigned, &res_assigned)
         .unwrap();
+    Ok(c_assigned)
 }
 
-pub fn add_test<F: BigPrimeField>(
+
+
+pub fn paillier_enc_add_test<F: BigPrimeField>(
     pool: &mut SinglePhaseCoreManager<F>,
     range: &RangeChip<F>,
     inputs: PaillierInputsAdd,
 ) {
-    let ctx = pool.main();
-    const ENC_BIT_LEN: usize = 128;
     let biguint_chip = BigUintChip::construct(range, inputs.limb_bits);
-    let paillier_chip = PaillierChip::construct(&biguint_chip, ENC_BIT_LEN, &inputs.n, &inputs.g);
-    let c1_assigned = biguint_chip
-        .assign_integer(ctx, Value::known(inputs.c1.clone()), ENC_BIT_LEN)
+    let ctx = pool.main();
+    let mut c1_assigned = biguint_chip
+        .assign_integer(ctx, Value::known(inputs.c1.clone()), inputs.enc_bits)
         .unwrap();
-    let c2_assigned = c1_assigned.clone();
-    //  let c3_assigned = biguint_chip.assign_integer(ctx, Value::known(cx.clone), enc_bit_len)?;
-
-    let c12_assigned = paillier_chip.add(ctx, &c1_assigned, &c2_assigned).unwrap();
-
-    let res_assigned = biguint_chip
-        .assign_integer(ctx, Value::known(inputs.res.clone()), ENC_BIT_LEN)
+    let mut c2_assigned = biguint_chip
+        .assign_integer(ctx, Value::known(inputs.c2.clone()), inputs.enc_bits)
         .unwrap();
 
-    // c12_assigned.value().zip(res_assigned.value()).map(|(a, b)| {
-    //     assert_eq!(a, b);
-    // });
-    biguint_chip
-        .assert_equal_fresh(ctx, &c12_assigned, &res_assigned)
+    let n_assigned = biguint_chip
+        .assign_integer(ctx, Value::known(inputs.n.clone()), inputs.enc_bits)
+        .unwrap();
+    let n2 = biguint_chip.square(ctx, &n_assigned).unwrap();
+    let aux = RefreshAux::new(
+        biguint_chip.limb_bits,
+        n_assigned.num_limbs(),
+        n_assigned.num_limbs(),
+    );
+    let n2 = biguint_chip.refresh(ctx, &n2, &aux).unwrap();
+
+    let zero_value = ctx.load_zero();
+    c1_assigned = c1_assigned.extend_limbs(n2.num_limbs() - c1_assigned.num_limbs(), zero_value);
+    c2_assigned = c2_assigned.extend_limbs(n2.num_limbs() - c2_assigned.num_limbs(), zero_value);
+    let result = biguint_chip
+        .mul_mod(ctx, &c1_assigned, &c2_assigned, &n2)
         .unwrap();
 }
 
@@ -87,6 +98,7 @@ pub fn paillier_add(n: &BigUint, c1: &BigUint, c2: &BigUint) -> BigUint {
 
 #[cfg(test)]
 mod test {
+
     use halo2_base::utils::testing::base_test;
     use num_bigint::BigUint;
     use num_bigint::RandBigInt;
@@ -94,8 +106,7 @@ mod test {
     use rand::thread_rng;
 
     use crate::{
-        bench::{add_test, paillier_add, paillier_enc_test, PaillierInputs, PaillierInputsAdd},
-        big_uint::chip::BigUintChip,
+        bench::{paillier_enc_add_test, paillier_enc_test, PaillierInputs, PaillierInputsAdd},
         paillier::paillier_enc,
     };
 
@@ -122,7 +133,7 @@ mod test {
             r: r.clone(),
             res: expected_c.clone(),
         };
-
+        
         let stats = base_test()
             .k(14)
             .lookup_bits(13)
@@ -131,7 +142,7 @@ mod test {
                 init_input.clone(),
                 init_input.clone(),
                 |pool, range, init_input: PaillierInputs| {
-                    paillier_enc_test(pool, range, init_input);
+                  let _ =  paillier_enc_test(pool, range, init_input);
                 },
             );
 
@@ -152,16 +163,14 @@ mod test {
 
         let n = rng.gen_biguint(ENC_BIT_LEN as u64);
         let g = rng.gen_biguint(ENC_BIT_LEN as u64);
-        let m = rng.gen_biguint(ENC_BIT_LEN as u64);
-        let r = rng.gen_biguint(ENC_BIT_LEN as u64);
 
-        // let expected_c1 = paillier_enc(&n, &g, &m, &r);
         let expected_c1 = BigUint::one();
         let expected_c2 = expected_c1.clone();
         //let res= paillier_add(&n, &expected_c1, &expected_c2);
         let res = BigUint::one() + BigUint::one();
         let init_input = PaillierInputsAdd {
             limb_bits: LIMB_BIT_LEN,
+            enc_bits: ENC_BIT_LEN,
             n: n.clone(),
             g: g.clone(),
             c1: expected_c1.clone(),
@@ -177,7 +186,7 @@ mod test {
                 init_input.clone(),
                 init_input.clone(),
                 |pool, range, init_input: PaillierInputsAdd| {
-                    add_test(pool, range, init_input);
+                    paillier_enc_add_test(pool, range, init_input);
                 },
             );
 

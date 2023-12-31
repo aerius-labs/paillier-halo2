@@ -198,8 +198,8 @@ mod test {
             g: &BigUint,
             m1: &BigUint,
             r1: &BigUint,
-            m2:&BigUint,
-            r2:&BigUint,
+            m2: &BigUint,
+            r2: &BigUint,
             res: &BigUint,
         ) {
             let biguint_chip = BigUintChip::construct(range, limb_bit_len);
@@ -244,7 +244,7 @@ mod test {
                 let r2 = rng.gen_biguint(ENC_BIT_LEN as u64);
 
                 let c1 = paillier_enc(&n, &g, &m1, &r1);
-                let c2 =paillier_enc(&n, &g, &m2, &r2);
+                let c2 = paillier_enc(&n, &g, &m2, &r2);
                 let expected_c12 = paillier_add(&n, &c1, &c2);
 
                 paillier_enc_add(
