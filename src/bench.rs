@@ -72,8 +72,12 @@ pub fn paillier_enc_add_test<F: BigPrimeField>(
     let paillier_chip =
     PaillierChip::construct(&biguint_chip, inputs.enc_bits, &inputs.n, &inputs.g);
 
-    let  c1_assigned = paillier_chip.encrypt(ctx, &inputs.m1, &inputs.r1).unwrap();
-    let  c2_assigned  = paillier_chip.encrypt(ctx, &inputs.m2, &inputs.r2).unwrap();
+    let  c1_assigned = biguint_chip
+    .assign_integer(ctx, Value::known(inputs.c1.clone()), inputs.enc_bits*2)
+    .unwrap();
+    let  c2_assigned  = biguint_chip
+    .assign_integer(ctx, Value::known(inputs.c2.clone()), inputs.enc_bits*2)
+    .unwrap();
     let  expected_res=paillier_chip.add(ctx, &c1_assigned, &c2_assigned).unwrap();
     let res_assigned = biguint_chip
     .assign_integer(ctx, Value::known(inputs.res.clone()), inputs.enc_bits*2)
