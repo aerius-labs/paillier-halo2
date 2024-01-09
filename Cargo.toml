@@ -1,5 +1,5 @@
 [package]
-name = "zksnap-halo2-dummy"
+name = "pallier-chip"
 version = "0.1.0"
 edition = "2021"
 
