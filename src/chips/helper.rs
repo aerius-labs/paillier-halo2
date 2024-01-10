@@ -7,6 +7,7 @@ use halo2_proofs::{
 };
 use mylib::circuits::modexp::Number;
 use mylib::circuits::Limb;
+
 use mylib::value_for_assign;
 use num_bigint::BigUint;
 
@@ -52,6 +53,9 @@ impl HelperChip {
     ) -> Result<Number<Fr>, Error> {
         Ok(Number::from_bn(base))
     }
+    pub fn assign_base1(&self, base: &BigUint) -> Result<Number<Fr>, Error> {
+        Ok(Number::from_bn(base))
+    }
 
     pub fn assign_modulus(
         &self,
@@ -89,6 +93,7 @@ impl HelperChip {
             cells.push(Some(c));
             *offset += 1;
         }
+
         let n = Number {
             limbs: [
                 Limb::new(cells[0].clone(), n.limbs[0].value),

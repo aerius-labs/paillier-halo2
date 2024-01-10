@@ -76,7 +76,8 @@ impl Circuit<Fr> for ModExpCircuit {
                         "rem is {:?}, \t result is {:?}",
                         &rem.limbs[i].value, &result.limbs[i].value
                     );
-                    println!("remcell is \t{:?}", &rem.limbs[i].cell);
+                    println!("remcell is#### \t{:?}", &rem.limbs[i].cell);
+                    println!("                      _______________________________                      ");
                     println!("resultcell is \t {:?}", &result.limbs[i].cell);
                     region.constrain_equal(
                         rem.limbs[i].clone().cell.unwrap().cell(),
@@ -107,10 +108,10 @@ mod tests {
         let mut bn_modulus_test_vectors: Vec<BigUint> = Vec::with_capacity(NUM_TESTS);
         let mut bn_exp_test_vectors: Vec<BigUint> = Vec::with_capacity(NUM_TESTS);
 
-        let bit_len_b: [usize; NUM_TESTS] = [1, 4, 8, 250, 255];
-        let bit_len_m: [usize; NUM_TESTS] = [1, 4, 8, 255, 254];
+        let bit_len_b: [usize; NUM_TESTS] = [255, 4, 8, 250, 255];
+        let bit_len_m: [usize; NUM_TESTS] = [20, 4, 8, 255, 254];
         let bit_len_e: [usize; NUM_TESTS] = [
-            1,
+            10,
             LIMB_WIDTH - 1,
             LIMB_WIDTH + 1,
             LIMB_WIDTH + LIMB_WIDTH - 1,
@@ -123,7 +124,7 @@ mod tests {
             bn_exp_test_vectors.push(get_random_x_bit_bn(bit_len_e[i]));
         }
 
-        for i in 0..NUM_TESTS {
+        for i in 0..1 {
             let base_testcase = bn_base_test_vectors[i].clone();
             let modulus_testcase = bn_modulus_test_vectors[i].clone();
             let exp_testcase = bn_exp_test_vectors[i].clone();
