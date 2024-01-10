@@ -1,5 +1,5 @@
 [package]
-name = "zksnap-halo2-dummy"
+name = "paillier-halo2"
 version = "0.1.0"
 edition = "2021"
 
