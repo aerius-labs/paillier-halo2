@@ -237,7 +237,6 @@ mod test {
             let biguint_chip = BigUintChip::construct(range, limb_bit_len);
             let paillier_chip =
                 super::PaillierChip::construct(&biguint_chip, enc_bit_len, n, n_b, g);
-            //paillier_chip.encrypt(ctx, *m, &r_assign).unwrap();
             let r1_assign = biguint_chip.assign_constant(ctx, r1).unwrap();
             let c1_assigned = paillier_chip.encrypt(ctx, m1, &r1_assign).unwrap();
             let r2_assign = biguint_chip.assign_constant(ctx, r2).unwrap();
