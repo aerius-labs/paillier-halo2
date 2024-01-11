@@ -5,7 +5,7 @@ use halo2_base::{
 };
 use num_bigint::BigUint;
 
-use crate::{big_uint::chip::BigUintChip, paillier::PaillierChip};
+use crate::{big_uint::chip::BigUintChip, pallier::PaillierChip};
 
 #[derive(Debug, Clone)]
 pub struct PallierInputs {
@@ -111,7 +111,7 @@ mod test {
 
     use crate::{
         bench::{pallier_enc_add_test, pallier_enc_test, PallierInputs, PallierInputsAdd},
-        paillier::paillier_enc,
+        pallier::paillier_enc,
     };
     use num_bigint::BigUint;
 

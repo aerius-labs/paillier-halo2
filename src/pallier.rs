@@ -142,7 +142,7 @@ mod test {
 
     use crate::{
         big_uint::{chip::BigUintChip, AssignedBigUint, Fresh},
-        paillier::paillier_enc,
+        pallier::paillier_enc,
     };
 
     #[test]
