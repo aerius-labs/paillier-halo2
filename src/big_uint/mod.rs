@@ -7,7 +7,7 @@ use num_bigint::BigUint;
 pub mod chip;
 
 #[derive(Debug, Clone)]
-pub struct AssignedBigUint<F: BigPrimeField, T: RangeType> {
+pub(crate) struct AssignedBigUint<F: BigPrimeField, T: RangeType> {
     int: OverflowInteger<F>,
     value: Value<BigUint>,
     _t: PhantomData<T>,

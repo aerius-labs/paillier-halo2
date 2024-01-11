@@ -70,7 +70,7 @@ impl<'a, F: BigPrimeField> PaillierChip<'a, F> {
     }
 }
 
-pub fn paillier_enc(n: &BigUint, g: &BigUint, m: &BigUint, r: &BigUint) -> BigUint {
+pub(crate) fn paillier_enc(n: &BigUint, g: &BigUint, m: &BigUint, r: &BigUint) -> BigUint {
     let n2 = n * n;
     let gm = g.modpow(m, &n2);
     let rn = r.modpow(n, &n2);

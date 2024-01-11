@@ -10,7 +10,7 @@ use num_bigint::BigUint;
 use super::{AssignedBigUint, Fresh, Muled, RefreshAux};
 
 #[derive(Clone, Debug)]
-pub struct BigUintChip<'a, F: BigPrimeField> {
+pub(crate) struct BigUintChip<'a, F: BigPrimeField> {
     pub range: &'a RangeChip<F>,
     pub limb_bits: usize,
 }
