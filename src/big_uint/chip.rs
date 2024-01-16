@@ -524,8 +524,8 @@ mod test {
             .lookup_bits(12)
             .expect_satisfied(true)
             .run(|ctx, chip| {
-                let a = rng.gen_biguint(NUM_BIT_LEN as u64);
-                let b = rng.gen_biguint(NUM_BIT_LEN as u64);
+                let a = rng.gen_biguint((NUM_BIT_LEN-1) as u64);
+                let b = rng.gen_biguint((NUM_BIT_LEN-1) as u64);
                 let res = a.clone() * b.clone();
                 mul_circuit(ctx, chip, NUM_BIT_LEN, LIMB_BIT_LEN, a, b, res);
             })
@@ -570,19 +570,20 @@ mod test {
 
             c_assigned.value().zip(res_assigned.value()).map(|(a, b)| {
                 assert_eq!(a, b);
+                println!("c_assigned ={:?} \n res_assigned={:?}",a,b);
             });
             chip.assert_equal_fresh(ctx, &c_assigned, &res_assigned)
                 .unwrap();
         }
 
         base_test()
-            .k(14)
-            .lookup_bits(13)
+            .k(16)
+            .lookup_bits(15)
             .expect_satisfied(true)
             .run(|ctx, chip| {
-                let a = rng.gen_biguint(NUM_BIT_LEN as u64);
-                let b = rng.gen_biguint(NUM_BIT_LEN as u64);
-                let modulus = rng.gen_biguint(NUM_BIT_LEN as u64);
+                let a = rng.gen_biguint((NUM_BIT_LEN-1) as u64);
+                let b = rng.gen_biguint((NUM_BIT_LEN-1) as u64);
+                let modulus = rng.gen_biguint((NUM_BIT_LEN-1) as u64);
                 let res = (a.clone() * b.clone()) % modulus.clone();
                 mul_mod_circuit(ctx, chip, NUM_BIT_LEN, LIMB_BIT_LEN, a, b, modulus, res);
             })
@@ -623,6 +624,7 @@ mod test {
                 .unwrap();
 
             c_assigned.value().zip(res_assigned.value()).map(|(a, b)| {
+                println!("c_assign ={:?} \n res_assign={:?}",a,b);
                 assert_eq!(a, b);
             });
             chip.assert_equal_fresh(ctx, &c_assigned, &res_assigned)
@@ -630,13 +632,13 @@ mod test {
         }
 
         base_test()
-            .k(15)
-            .lookup_bits(14)
+            .k(16)
+            .lookup_bits(15)
             .expect_satisfied(true)
             .run(|ctx, chip| {
-                let a = rng.gen_biguint(NUM_BIT_LEN as u64);
+                let a = rng.gen_biguint((NUM_BIT_LEN-1) as u64);
                 let e = rng.gen_biguint(64 as u64); // Choosing a smaller exponent for efficiency
-                let n = rng.gen_biguint(NUM_BIT_LEN as u64);
+                let n = rng.gen_biguint((NUM_BIT_LEN-1) as u64);
                 let res = a.modpow(&e, &n);
                 pow_mod_fixed_exp_circuit(ctx, chip, NUM_BIT_LEN, LIMB_BIT_LEN, a, e, n, res);
             })

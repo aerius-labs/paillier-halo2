@@ -79,6 +79,7 @@ impl<'a, F: BigPrimeField> PaillierChip<'a, F> {
 
         Ok(c)
     }
+
     pub fn add(
         &self,
         ctx: &mut Context<F>,
@@ -142,7 +143,7 @@ mod test {
 
     use crate::{
         big_uint::{chip::BigUintChip, AssignedBigUint, Fresh},
-        pallier::paillier_enc,
+        paillier::paillier_enc,
     };
 
     #[test]
@@ -215,8 +216,8 @@ mod test {
     }
     #[test]
     fn test_encryption_addition() {
-        const ENC_BIT_LEN: usize = 128;
-        const LIMB_BIT_LEN: usize = 64;
+        const ENC_BIT_LEN: usize = 264;
+        const LIMB_BIT_LEN: usize = 88;
 
         let mut rng = thread_rng();
 

@@ -5,10 +5,10 @@ use halo2_base::{
 };
 use num_bigint::BigUint;
 
-use crate::{big_uint::chip::BigUintChip, pallier::PaillierChip};
+use crate::{big_uint::chip::BigUintChip, paillier::PaillierChip};
 
 #[derive(Debug, Clone)]
-pub struct PallierInputs {
+pub struct PaillierInputs {
     pub enc_bits: usize,
     pub limb_bits: usize,
     pub n: BigUint,
@@ -18,7 +18,7 @@ pub struct PallierInputs {
     pub res: BigUint,
 }
 #[derive(Debug, Clone)]
-pub struct PallierInputsAdd {
+pub struct PaillierInputsAdd {
     pub limb_bits: usize,
     pub enc_bits: usize,
     pub n: BigUint,
@@ -28,10 +28,10 @@ pub struct PallierInputsAdd {
     pub res: BigUint,
 }
 
-pub fn pallier_enc_test<F: BigPrimeField>(
+pub fn paillier_enc_test<F: BigPrimeField>(
     pool: &mut SinglePhaseCoreManager<F>,
     range: &RangeChip<F>,
-    inputs: PallierInputs,
+    inputs: PaillierInputs,
 ) {
     let ctx = pool.main();
     let biguint_chip = BigUintChip::construct(range, inputs.limb_bits);
@@ -61,10 +61,10 @@ pub fn pallier_enc_test<F: BigPrimeField>(
         .unwrap();
 }
 
-pub fn pallier_enc_add_test<F: BigPrimeField>(
+pub fn paillier_enc_add_test<F: BigPrimeField>(
     pool: &mut SinglePhaseCoreManager<F>,
     range: &RangeChip<F>,
-    inputs: PallierInputsAdd,
+    inputs: PaillierInputsAdd,
 ) {
     let biguint_chip = BigUintChip::construct(range, inputs.limb_bits);
     let ctx = pool.main();
@@ -110,24 +110,22 @@ mod test {
     use rand::thread_rng;
 
     use crate::{
-        bench::{pallier_enc_add_test, pallier_enc_test, PallierInputs, PallierInputsAdd},
-        pallier::paillier_enc,
+        bench::{paillier_enc_add_test, paillier_enc_test, PaillierInputs, PaillierInputsAdd},
+        paillier::paillier_enc,
     };
     use num_bigint::BigUint;
 
-    pub fn pallier_add(n: &BigUint, c1: &BigUint, c2: &BigUint) -> BigUint {
+    pub fn paillier_add(n: &BigUint, c1: &BigUint, c2: &BigUint) -> BigUint {
         let n2 = n * n;
         (c1 * c2) % n2
     }
 
     #[test]
-    fn bench_pallier_enc() {
+    fn bench_paillier_enc() {
         const ENC_BIT_LEN: usize = 128;
         const LIMB_BIT_LEN: usize = 64;
 
         let mut rng = thread_rng();
-
-        println!("TEST PALLIER ENCRYPTION");
 
         let n = rng.gen_biguint(ENC_BIT_LEN as u64);
         let g = rng.gen_biguint(ENC_BIT_LEN as u64);
@@ -136,7 +134,7 @@ mod test {
 
         let expected_c = paillier_enc(&n, &g, &m, &r);
 
-        let init_input = PallierInputs {
+        let init_input = PaillierInputs {
             enc_bits: ENC_BIT_LEN,
             limb_bits: LIMB_BIT_LEN,
             n: n.clone(),
@@ -153,7 +151,9 @@ mod test {
             .bench_builder(
                 init_input.clone(),
                 init_input.clone(),
-                |pool, range, init_input: PallierInputs| pallier_enc_test(pool, range, init_input),
+                |pool, range, init_input: PaillierInputs| {
+                    paillier_enc_test(pool, range, init_input)
+                },
             );
 
         println!("config params = {:?}", stats.config_params);
@@ -165,11 +165,9 @@ mod test {
     }
 
     #[test]
-    fn bench_pallier_enc_add() {
+    fn bench_paillier_enc_add() {
         const ENC_BIT_LEN: usize = 128;
         const LIMB_BIT_LEN: usize = 64;
-
-        println!("TESTING PALLIER ENC ADD ");
 
         let mut rng = thread_rng();
 
@@ -182,9 +180,9 @@ mod test {
 
         let expected_c1 = paillier_enc(&n, &g, &m1, &r1);
         let expected_c2 = paillier_enc(&n, &g, &m2, &r2);
-        let res = pallier_add(&n, &expected_c1, &expected_c2);
+        let res = paillier_add(&n, &expected_c1, &expected_c2);
 
-        let init_input = PallierInputsAdd {
+        let init_input = PaillierInputsAdd {
             limb_bits: LIMB_BIT_LEN,
             enc_bits: ENC_BIT_LEN,
             n: n.clone(),
@@ -201,8 +199,8 @@ mod test {
             .bench_builder(
                 init_input.clone(),
                 init_input.clone(),
-                |pool, range, init_input: PallierInputsAdd| {
-                    pallier_enc_add_test(pool, range, init_input);
+                |pool, range, init_input: PaillierInputsAdd| {
+                    paillier_enc_add_test(pool, range, init_input);
                 },
             );
 
