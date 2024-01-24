@@ -1,11 +1,10 @@
+use biguint_halo2::big_uint::{chip::BigUintChip, AssignedBigUint, Fresh, RefreshAux};
 use halo2_base::{
     halo2_proofs::{circuit::Value, plonk::Error},
     utils::BigPrimeField,
     Context,
 };
 use num_bigint::BigUint;
-
-use crate::big_uint::{chip::BigUintChip, AssignedBigUint, Fresh, RefreshAux};
 
 #[derive(Debug, Clone)]
 pub struct PaillierChip<'a, F: BigPrimeField> {
@@ -106,7 +105,7 @@ impl<'a, F: BigPrimeField> PaillierChip<'a, F> {
     }
 }
 
-pub(crate) fn paillier_enc(n: &BigUint, g: &BigUint, m: &BigUint, r: &BigUint) -> BigUint {
+pub fn paillier_enc_native(n: &BigUint, g: &BigUint, m: &BigUint, r: &BigUint) -> BigUint {
     let n2 = n * n;
     let gm = g.modpow(m, &n2);
     let rn = r.modpow(n, &n2);
@@ -115,6 +114,7 @@ pub(crate) fn paillier_enc(n: &BigUint, g: &BigUint, m: &BigUint, r: &BigUint) -
 
 #[cfg(test)]
 mod test {
+    use biguint_halo2::big_uint::chip::BigUintChip;
     use halo2_base::{
         gates::RangeChip,
         halo2_proofs::circuit::Value,
@@ -124,7 +124,7 @@ mod test {
     use num_bigint::{BigUint, RandBigInt};
     use rand::thread_rng;
 
-    use crate::{big_uint::chip::BigUintChip, paillier::paillier_enc};
+    use crate::paillier::paillier_enc_native;
 
     #[test]
     fn test_paillier_encryption() {
@@ -172,7 +172,7 @@ mod test {
                 let m = rng.gen_biguint(ENC_BIT_LEN as u64);
                 let r = rng.gen_biguint(ENC_BIT_LEN as u64);
 
-                let res = paillier_enc(&n, &g, &m, &r);
+                let res = paillier_enc_native(&n, &g, &m, &r);
 
                 paillier_enc_circuit(ctx, range, ENC_BIT_LEN, LIMB_BIT_LEN, n, g, m, r, res);
             });

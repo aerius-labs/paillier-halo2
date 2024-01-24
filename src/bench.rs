@@ -1,3 +1,4 @@
+use biguint_halo2::big_uint::chip::BigUintChip;
 use halo2_base::{
     gates::{flex_gate::threads::SinglePhaseCoreManager, RangeChip},
     halo2_proofs::circuit::Value,
@@ -5,7 +6,7 @@ use halo2_base::{
 };
 use num_bigint::BigUint;
 
-use crate::{big_uint::chip::BigUintChip, paillier::PaillierChip};
+use crate::paillier::PaillierChip;
 
 #[derive(Debug, Clone)]
 pub struct PaillierEncryptionInput {
@@ -91,7 +92,7 @@ mod test {
             paillier_enc_add_test, paillier_enc_test, PaillierAddCipherInput,
             PaillierEncryptionInput,
         },
-        paillier::paillier_enc,
+        paillier::paillier_enc_native,
     };
     use num_bigint::BigUint;
 
@@ -112,7 +113,7 @@ mod test {
         let m = rng.gen_biguint(ENC_BIT_LEN as u64);
         let r = rng.gen_biguint(ENC_BIT_LEN as u64);
 
-        let expected_c = paillier_enc(&n, &g, &m, &r);
+        let expected_c = paillier_enc_native(&n, &g, &m, &r);
 
         let init_input = PaillierEncryptionInput {
             enc_bits: ENC_BIT_LEN,
@@ -158,8 +159,8 @@ mod test {
         let m2 = rng.gen_biguint(ENC_BIT_LEN as u64);
         let r2 = rng.gen_biguint(ENC_BIT_LEN as u64);
 
-        let expected_c1 = paillier_enc(&n, &g, &m1, &r1);
-        let expected_c2 = paillier_enc(&n, &g, &m2, &r2);
+        let expected_c1 = paillier_enc_native(&n, &g, &m1, &r1);
+        let expected_c2 = paillier_enc_native(&n, &g, &m2, &r2);
         let res = paillier_add(&n, &expected_c1, &expected_c2);
 
         let init_input = PaillierAddCipherInput {
