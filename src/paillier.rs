@@ -1,67 +1,58 @@
-use biguint_halo2::big_uint::{chip::BigUintChip, AssignedBigUint, Fresh, RefreshAux};
-use halo2_base::{
-    halo2_proofs::{circuit::Value, plonk::Error},
-    utils::BigPrimeField,
-    Context,
-};
+use biguint_halo2::big_uint::{ chip::BigUintChip, AssignedBigUint, Fresh, RefreshAux };
+use halo2_base::{ halo2_proofs::plonk::Error, utils::{ fe_to_biguint, BigPrimeField }, Context };
 use num_bigint::BigUint;
+use num_traits::Zero;
+
+pub struct EncryptionPublicKeyAssigned<F: BigPrimeField> {
+    pub n: AssignedBigUint<F, Fresh>,
+    pub g: AssignedBigUint<F, Fresh>,
+}
 
 #[derive(Debug, Clone)]
 pub struct PaillierChip<'a, F: BigPrimeField> {
     pub biguint: &'a BigUintChip<'a, F>,
     pub enc_bits: usize,
-    pub n: BigUint,
-    pub g: BigUint,
 }
 
 impl<'a, F: BigPrimeField> PaillierChip<'a, F> {
-    pub fn construct(
-        biguint: &'a BigUintChip<'a, F>,
-        enc_bits: usize,
-        n: BigUint,
-        g: BigUint,
-    ) -> Self {
-        Self {
-            biguint,
-            enc_bits,
-            n,
-            g,
-        }
+    pub fn construct(biguint: &'a BigUintChip<'a, F>, enc_bits: usize) -> Self {
+        Self { biguint, enc_bits }
+    }
+
+    pub fn get_biguint(&self, assigned: &AssignedBigUint<F, Fresh>) -> BigUint {
+        assigned
+            .limbs()
+            .iter()
+            .rev()
+            .fold(BigUint::zero(), |acc, acell| {
+                (acc << assigned.int_ref().max_limb_bits) + fe_to_biguint(acell.value())
+            })
     }
 
     pub fn encrypt(
         &self,
         ctx: &mut Context<F>,
-        m: &BigUint,
-        r: &BigUint,
+        pk_enc: &EncryptionPublicKeyAssigned<F>,
+        m: &AssignedBigUint<F, Fresh>,
+        r: &AssignedBigUint<F, Fresh>
     ) -> Result<AssignedBigUint<F, Fresh>, Error> {
-        let n_assigned =
-            self.biguint
-                .assign_integer(ctx, Value::known(self.n.clone()), self.enc_bits)?;
-        let mut g_assigned =
-            self.biguint
-                .assign_integer(ctx, Value::known(self.g.clone()), self.enc_bits)?;
-        let mut r_assigned =
-            self.biguint
-                .assign_integer(ctx, Value::known(r.clone()), self.enc_bits)?;
-
-        let n2 = self.biguint.square(ctx, &n_assigned)?;
+        let n2 = self.biguint.square(ctx, &pk_enc.n)?;
         let aux = RefreshAux::new(
             self.biguint.limb_bits,
-            n_assigned.num_limbs(),
-            n_assigned.num_limbs(),
+            pk_enc.n.num_limbs(),
+            pk_enc.n.num_limbs()
         );
         let n2 = self.biguint.refresh(ctx, &n2, &aux)?;
 
         let zero_value = ctx.load_zero();
 
-        g_assigned = g_assigned.extend_limbs(n2.num_limbs() - g_assigned.num_limbs(), zero_value);
-        let gm = self.biguint.pow_mod_fixed_exp(ctx, &g_assigned, m, &n2)?;
+        let g_extended = pk_enc.g.extend_limbs(n2.num_limbs() - pk_enc.g.num_limbs(), zero_value);
+        let m_biguint = self.get_biguint(m);
+        let gm = self.biguint.pow_mod_fixed_exp(ctx, &g_extended, &m_biguint, &n2)?;
 
-        r_assigned = r_assigned.extend_limbs(n2.num_limbs() - r_assigned.num_limbs(), zero_value);
-        let rn = self
-            .biguint
-            .pow_mod_fixed_exp(ctx, &r_assigned, &self.n, &n2)?;
+        let r_extended = r.extend_limbs(n2.num_limbs() - r.num_limbs(), zero_value);
+        let n_biguint = self.get_biguint(&pk_enc.n);
+        let rn = self.biguint.pow_mod_fixed_exp(ctx, &r_extended, &n_biguint, &n2)?;
 
         let c = self.biguint.mul_mod(ctx, &gm, &rn, &n2)?;
 
@@ -71,35 +62,23 @@ impl<'a, F: BigPrimeField> PaillierChip<'a, F> {
     pub fn add(
         &self,
         ctx: &mut Context<F>,
-        c1: &BigUint,
-        c2: &BigUint,
+        pk_enc: &EncryptionPublicKeyAssigned<F>,
+        c1: &AssignedBigUint<F, Fresh>,
+        c2: &AssignedBigUint<F, Fresh>
     ) -> Result<AssignedBigUint<F, Fresh>, Error> {
-        let n_assigned =
-            self.biguint
-                .assign_integer(ctx, Value::known(self.n.clone()), self.enc_bits)?;
-
-        let n2 = self.biguint.square(ctx, &n_assigned)?;
+        let n2 = self.biguint.square(ctx, &pk_enc.n)?;
         let aux = RefreshAux::new(
             self.biguint.limb_bits,
-            n_assigned.num_limbs(),
-            n_assigned.num_limbs(),
+            pk_enc.n.num_limbs(),
+            pk_enc.n.num_limbs()
         );
         let n2 = self.biguint.refresh(ctx, &n2, &aux)?;
 
         let zero_value = ctx.load_zero();
 
-        let mut c1_assigned =
-            self.biguint
-                .assign_integer(ctx, Value::known(c1.clone()), self.enc_bits * 2)?;
-        let mut c2_assigned =
-            self.biguint
-                .assign_integer(ctx, Value::known(c2.clone()), self.enc_bits * 2)?;
-
-        c1_assigned =
-            c1_assigned.extend_limbs(n2.num_limbs() - c1_assigned.num_limbs(), zero_value);
-        c2_assigned =
-            c2_assigned.extend_limbs(n2.num_limbs() - c2_assigned.num_limbs(), zero_value);
-        let result = self.biguint.mul_mod(ctx, &c1_assigned, &c2_assigned, &n2)?;
+        let c1_extended = c1.extend_limbs(n2.num_limbs() - c1.num_limbs(), zero_value);
+        let c2_extended = c2.extend_limbs(n2.num_limbs() - c2.num_limbs(), zero_value);
+        let result = self.biguint.mul_mod(ctx, &c1_extended, &c2_extended, &n2)?;
 
         Ok(result)
     }
@@ -112,16 +91,21 @@ pub fn paillier_enc_native(n: &BigUint, g: &BigUint, m: &BigUint, r: &BigUint) -
     (gm * rn) % n2
 }
 
+pub fn paillier_add_native(n: &BigUint, c1: &BigUint, c2: &BigUint) -> BigUint {
+    let n2 = n * n;
+    (c1 * c2) % n2
+}
+
 #[cfg(test)]
 mod test {
     use biguint_halo2::big_uint::chip::BigUintChip;
     use halo2_base::{
         gates::RangeChip,
         halo2_proofs::circuit::Value,
-        utils::{testing::base_test, BigPrimeField},
+        utils::{ testing::base_test, BigPrimeField },
         Context,
     };
-    use num_bigint::{BigUint, RandBigInt};
+    use num_bigint::{ BigUint, RandBigInt };
     use rand::thread_rng;
 
     use crate::paillier::paillier_enc_native;
@@ -142,23 +126,42 @@ mod test {
             g: BigUint,
             m: BigUint,
             r: BigUint,
-            res: BigUint,
+            res: BigUint
         ) {
             let biguint_chip = BigUintChip::construct(range, limb_bit_len);
-            let paillier_chip = super::PaillierChip::construct(&biguint_chip, enc_bit_len, n, g);
+            let paillier_chip = super::PaillierChip::construct(&biguint_chip, enc_bit_len);
 
-            let c_assigned = paillier_chip.encrypt(ctx, &m, &r).unwrap();
+            let n_assigned = biguint_chip
+                .assign_integer(ctx, Value::known(n.clone()), enc_bit_len)
+                .unwrap();
+            let g_assigned = biguint_chip
+                .assign_integer(ctx, Value::known(g.clone()), enc_bit_len)
+                .unwrap();
+            let pk_enc = super::EncryptionPublicKeyAssigned {
+                n: n_assigned,
+                g: g_assigned,
+            };
+
+            let m_assigned = biguint_chip
+                .assign_integer(ctx, Value::known(m.clone()), enc_bit_len)
+                .unwrap();
+            let r_assigned = biguint_chip
+                .assign_integer(ctx, Value::known(r.clone()), enc_bit_len)
+                .unwrap();
+
+            let c_assigned = paillier_chip.encrypt(ctx, &pk_enc, &m_assigned, &r_assigned).unwrap();
 
             let res_assigned = biguint_chip
                 .assign_integer(ctx, Value::known(res.clone()), enc_bit_len * 2)
                 .unwrap();
 
-            c_assigned.value().zip(res_assigned.value()).map(|(a, b)| {
-                assert_eq!(a, b);
-            });
-            biguint_chip
-                .assert_equal_fresh(ctx, &c_assigned, &res_assigned)
-                .unwrap();
+            c_assigned
+                .value()
+                .zip(res_assigned.value())
+                .map(|(a, b)| {
+                    assert_eq!(a, b);
+                });
+            biguint_chip.assert_equal_fresh(ctx, &c_assigned, &res_assigned).unwrap();
         }
 
         base_test()
@@ -194,12 +197,32 @@ mod test {
             g: BigUint,
             c1: BigUint,
             c2: BigUint,
-            res: BigUint,
+            res: BigUint
         ) {
             let biguint_chip = BigUintChip::construct(range, limb_bit_len);
-            let paillier_chip = super::PaillierChip::construct(&biguint_chip, enc_bit_len, n, g);
+            let paillier_chip = super::PaillierChip::construct(&biguint_chip, enc_bit_len);
 
-            let c_add_assigned = paillier_chip.add(ctx, &c1, &c2).unwrap();
+            let n_assigned = biguint_chip
+                .assign_integer(ctx, Value::known(n.clone()), enc_bit_len)
+                .unwrap();
+            let g_assigned = biguint_chip
+                .assign_integer(ctx, Value::known(g.clone()), enc_bit_len)
+                .unwrap();
+            let pk_enc = super::EncryptionPublicKeyAssigned {
+                n: n_assigned,
+                g: g_assigned,
+            };
+
+            let c1_assigned = biguint_chip
+                .assign_integer(ctx, Value::known(c1.clone()), enc_bit_len)
+                .unwrap();
+            let c2_assigned = biguint_chip
+                .assign_integer(ctx, Value::known(c2.clone()), enc_bit_len)
+                .unwrap();
+
+            let c_add_assigned = paillier_chip
+                .add(ctx, &pk_enc, &c1_assigned, &c2_assigned)
+                .unwrap();
 
             let res_assigned = biguint_chip
                 .assign_integer(ctx, Value::known(res.clone()), enc_bit_len * 2)
@@ -211,9 +234,7 @@ mod test {
                 .map(|(a, b)| {
                     assert_eq!(a, b);
                 });
-            biguint_chip
-                .assert_equal_fresh(ctx, &c_add_assigned, &res_assigned)
-                .unwrap();
+            biguint_chip.assert_equal_fresh(ctx, &c_add_assigned, &res_assigned).unwrap();
         }
 
         fn paillier_add(n: &BigUint, c1: &BigUint, c2: &BigUint) -> BigUint {
