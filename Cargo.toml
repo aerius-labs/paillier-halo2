@@ -1,5 +1,5 @@
 [package]
-name = "paillier-halo2"
+name = "paillier-chip"
 version = "0.1.0"
 edition = "2021"
 
