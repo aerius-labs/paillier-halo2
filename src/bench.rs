@@ -1,11 +1,11 @@
 use halo2_base::{
-    gates::{ flex_gate::threads::SinglePhaseCoreManager, RangeChip },
+    gates::{flex_gate::threads::SinglePhaseCoreManager, RangeChip},
     halo2_proofs::circuit::Value,
     utils::BigPrimeField,
 };
 use num_bigint::BigUint;
 
-use crate::{ big_uint::chip::BigUintChip, paillier::PaillierChip };
+use crate::{big_uint::chip::BigUintChip, paillier::PaillierChip};
 
 #[derive(Debug, Clone)]
 pub struct PaillierEncryptionInput {
@@ -32,7 +32,7 @@ pub struct PaillierAddCipherInput {
 pub fn paillier_enc_test<F: BigPrimeField>(
     pool: &mut SinglePhaseCoreManager<F>,
     range: &RangeChip<F>,
-    input: PaillierEncryptionInput
+    input: PaillierEncryptionInput,
 ) {
     let ctx = pool.main();
 
@@ -46,19 +46,18 @@ pub fn paillier_enc_test<F: BigPrimeField>(
         .assign_integer(ctx, Value::known(input.res), input.enc_bits * 2)
         .unwrap();
 
-    c_assigned
-        .value()
-        .zip(res_assigned.value())
-        .map(|(a, b)| {
-            assert_eq!(a, b);
-        });
-    biguint_chip.assert_equal_fresh(ctx, &c_assigned, &res_assigned).unwrap();
+    c_assigned.value().zip(res_assigned.value()).map(|(a, b)| {
+        assert_eq!(a, b);
+    });
+    biguint_chip
+        .assert_equal_fresh(ctx, &c_assigned, &res_assigned)
+        .unwrap();
 }
 
 pub fn paillier_enc_add_test<F: BigPrimeField>(
     pool: &mut SinglePhaseCoreManager<F>,
     range: &RangeChip<F>,
-    input: PaillierAddCipherInput
+    input: PaillierAddCipherInput,
 ) {
     let biguint_chip = BigUintChip::construct(range, input.limb_bits);
     let ctx = pool.main();
@@ -78,12 +77,12 @@ pub fn paillier_enc_add_test<F: BigPrimeField>(
         .assign_integer(ctx, Value::known(input.res.clone()), input.enc_bits * 2)
         .unwrap();
 
-    _res.value()
-        .zip(res_assigned.value())
-        .map(|(a, b)| {
-            assert_eq!(a, b);
-        });
-    biguint_chip.assert_equal_fresh(ctx, &_res, &res_assigned).unwrap();
+    _res.value().zip(res_assigned.value()).map(|(a, b)| {
+        assert_eq!(a, b);
+    });
+    biguint_chip
+        .assert_equal_fresh(ctx, &_res, &res_assigned)
+        .unwrap();
 }
 
 #[cfg(test)]
@@ -96,9 +95,7 @@ mod test {
 
     use crate::{
         bench::{
-            paillier_enc_add_test,
-            paillier_enc_test,
-            PaillierAddCipherInput,
+            paillier_enc_add_test, paillier_enc_test, PaillierAddCipherInput,
             PaillierEncryptionInput,
         },
         paillier::paillier_enc,
@@ -143,7 +140,7 @@ mod test {
                 init_input.clone(),
                 |pool, range, init_input: PaillierEncryptionInput| {
                     paillier_enc_test(pool, range, init_input)
-                }
+                },
             );
 
         println!("config params = {:?}", stats.config_params);
@@ -191,7 +188,7 @@ mod test {
                 init_input.clone(),
                 |pool, range, init_input: PaillierAddCipherInput| {
                     paillier_enc_add_test(pool, range, init_input);
-                }
+                },
             );
 
         println!("config params2 = {:?}", stats.config_params);
