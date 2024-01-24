@@ -1,14 +1,14 @@
 use halo2_base::{
-    gates::{flex_gate::threads::SinglePhaseCoreManager, RangeChip},
+    gates::{ flex_gate::threads::SinglePhaseCoreManager, RangeChip },
     halo2_proofs::circuit::Value,
     utils::BigPrimeField,
 };
 use num_bigint::BigUint;
 
-use crate::{big_uint::chip::BigUintChip, paillier::PaillierChip};
+use crate::{ big_uint::chip::BigUintChip, paillier::PaillierChip };
 
 #[derive(Debug, Clone)]
-pub struct PaillierInputs {
+pub struct PaillierEncryptionInput {
     pub enc_bits: usize,
     pub limb_bits: usize,
     pub n: BigUint,
@@ -17,8 +17,9 @@ pub struct PaillierInputs {
     pub r: BigUint,
     pub res: BigUint,
 }
+
 #[derive(Debug, Clone)]
-pub struct PaillierInputsAdd {
+pub struct PaillierAddCipherInput {
     pub limb_bits: usize,
     pub enc_bits: usize,
     pub n: BigUint,
@@ -31,78 +32,62 @@ pub struct PaillierInputsAdd {
 pub fn paillier_enc_test<F: BigPrimeField>(
     pool: &mut SinglePhaseCoreManager<F>,
     range: &RangeChip<F>,
-    inputs: PaillierInputs,
+    input: PaillierEncryptionInput
 ) {
     let ctx = pool.main();
-    let biguint_chip = BigUintChip::construct(range, inputs.limb_bits);
-    let n_b = inputs.n.clone();
-    let n = biguint_chip
-        .assign_integer(ctx, Value::known(inputs.n), inputs.enc_bits)
-        .unwrap();
-    let g = biguint_chip
-        .assign_integer(ctx, Value::known(inputs.g), inputs.enc_bits)
-        .unwrap();
-    let r = biguint_chip
-        .assign_integer(ctx, Value::known(inputs.r), inputs.enc_bits)
-        .unwrap();
-    let paillier_chip = PaillierChip::construct(&biguint_chip, inputs.enc_bits, &n, n_b, &g);
 
-    let c_assigned = paillier_chip.encrypt(ctx, inputs.m, &r).unwrap();
+    let biguint_chip = BigUintChip::construct(range, input.limb_bits);
+
+    let paillier_chip = PaillierChip::construct(&biguint_chip, input.enc_bits, input.n, input.g);
+
+    let c_assigned = paillier_chip.encrypt(ctx, &input.m, &input.r).unwrap();
 
     let res_assigned = biguint_chip
-        .assign_integer(ctx, Value::known(inputs.res.clone()), inputs.enc_bits * 2)
+        .assign_integer(ctx, Value::known(input.res), input.enc_bits * 2)
         .unwrap();
 
-    c_assigned.value().zip(res_assigned.value()).map(|(a, b)| {
-        assert_eq!(a, b);
-    });
-    biguint_chip
-        .assert_equal_fresh(ctx, &c_assigned, &res_assigned)
-        .unwrap();
-}
-
-pub fn paillier_enc_add_test<F: BigPrimeField>(
-    pool: &mut SinglePhaseCoreManager<F>,
-    range: &RangeChip<F>,
-    inputs: PaillierInputsAdd,
-) {
-    let biguint_chip = BigUintChip::construct(range, inputs.limb_bits);
-    let ctx = pool.main();
-    let n_b = inputs.n.clone();
-
-    let n = biguint_chip
-        .assign_integer(ctx, Value::known(inputs.n), inputs.enc_bits)
-        .unwrap();
-    let g = biguint_chip
-        .assign_integer(ctx, Value::known(inputs.g), inputs.enc_bits)
-        .unwrap();
-
-    let paillier_chip = PaillierChip::construct(&biguint_chip, inputs.enc_bits, &n, n_b, &g);
-
-    let c1_assigned = biguint_chip
-        .assign_integer(ctx, Value::known(inputs.c1.clone()), inputs.enc_bits * 2)
-        .unwrap();
-    let c2_assigned = biguint_chip
-        .assign_integer(ctx, Value::known(inputs.c2.clone()), inputs.enc_bits * 2)
-        .unwrap();
-    let expected_res = paillier_chip.add(ctx, &c1_assigned, &c2_assigned).unwrap();
-    let res_assigned = biguint_chip
-        .assign_integer(ctx, Value::known(inputs.res.clone()), inputs.enc_bits * 2)
-        .unwrap();
-    expected_res
+    c_assigned
         .value()
         .zip(res_assigned.value())
         .map(|(a, b)| {
             assert_eq!(a, b);
         });
-    biguint_chip
-        .assert_equal_fresh(ctx, &expected_res, &res_assigned)
+    biguint_chip.assert_equal_fresh(ctx, &c_assigned, &res_assigned).unwrap();
+}
+
+pub fn paillier_enc_add_test<F: BigPrimeField>(
+    pool: &mut SinglePhaseCoreManager<F>,
+    range: &RangeChip<F>,
+    input: PaillierAddCipherInput
+) {
+    let biguint_chip = BigUintChip::construct(range, input.limb_bits);
+    let ctx = pool.main();
+
+    let paillier_chip = PaillierChip::construct(&biguint_chip, input.enc_bits, input.n, input.g);
+
+    let c1_assigned = biguint_chip
+        .assign_integer(ctx, Value::known(input.c1.clone()), input.enc_bits * 2)
         .unwrap();
+    let c2_assigned = biguint_chip
+        .assign_integer(ctx, Value::known(input.c2.clone()), input.enc_bits * 2)
+        .unwrap();
+
+    let _res = paillier_chip.add(ctx, &c1_assigned, &c2_assigned).unwrap();
+
+    let res_assigned = biguint_chip
+        .assign_integer(ctx, Value::known(input.res.clone()), input.enc_bits * 2)
+        .unwrap();
+
+    _res.value()
+        .zip(res_assigned.value())
+        .map(|(a, b)| {
+            assert_eq!(a, b);
+        });
+    biguint_chip.assert_equal_fresh(ctx, &_res, &res_assigned).unwrap();
 }
 
 #[cfg(test)]
 mod test {
-
     use halo2_base::utils::testing::base_test;
 
     use num_bigint::RandBigInt;
@@ -110,7 +95,12 @@ mod test {
     use rand::thread_rng;
 
     use crate::{
-        bench::{paillier_enc_add_test, paillier_enc_test, PaillierInputs, PaillierInputsAdd},
+        bench::{
+            paillier_enc_add_test,
+            paillier_enc_test,
+            PaillierAddCipherInput,
+            PaillierEncryptionInput,
+        },
         paillier::paillier_enc,
     };
     use num_bigint::BigUint;
@@ -134,7 +124,7 @@ mod test {
 
         let expected_c = paillier_enc(&n, &g, &m, &r);
 
-        let init_input = PaillierInputs {
+        let init_input = PaillierEncryptionInput {
             enc_bits: ENC_BIT_LEN,
             limb_bits: LIMB_BIT_LEN,
             n: n.clone(),
@@ -151,9 +141,9 @@ mod test {
             .bench_builder(
                 init_input.clone(),
                 init_input.clone(),
-                |pool, range, init_input: PaillierInputs| {
+                |pool, range, init_input: PaillierEncryptionInput| {
                     paillier_enc_test(pool, range, init_input)
-                },
+                }
             );
 
         println!("config params = {:?}", stats.config_params);
@@ -182,7 +172,7 @@ mod test {
         let expected_c2 = paillier_enc(&n, &g, &m2, &r2);
         let res = paillier_add(&n, &expected_c1, &expected_c2);
 
-        let init_input = PaillierInputsAdd {
+        let init_input = PaillierAddCipherInput {
             limb_bits: LIMB_BIT_LEN,
             enc_bits: ENC_BIT_LEN,
             n: n.clone(),
@@ -199,9 +189,9 @@ mod test {
             .bench_builder(
                 init_input.clone(),
                 init_input.clone(),
-                |pool, range, init_input: PaillierInputsAdd| {
+                |pool, range, init_input: PaillierAddCipherInput| {
                     paillier_enc_add_test(pool, range, init_input);
-                },
+                }
             );
 
         println!("config params2 = {:?}", stats.config_params);
