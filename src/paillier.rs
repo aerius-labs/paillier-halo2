@@ -72,8 +72,8 @@ impl<'a, F: BigPrimeField> PaillierChip<'a, F> {
     pub fn add(
         &self,
         ctx: &mut Context<F>,
-        c1: &AssignedBigUint<F, Fresh>,
-        c2: &AssignedBigUint<F, Fresh>,
+        c1: &BigUint,
+        c2: &BigUint,
     ) -> Result<AssignedBigUint<F, Fresh>, Error> {
         let n_assigned =
             self.biguint
@@ -89,9 +89,18 @@ impl<'a, F: BigPrimeField> PaillierChip<'a, F> {
 
         let zero_value = ctx.load_zero();
 
-        let c1 = c1.extend_limbs(n2.num_limbs() - c1.num_limbs(), zero_value);
-        let c2 = c2.extend_limbs(n2.num_limbs() - c2.num_limbs(), zero_value);
-        let result = self.biguint.mul_mod(ctx, &c1, &c2, &n2)?;
+        let mut c1_assigned =
+            self.biguint
+                .assign_integer(ctx, Value::known(c1.clone()), self.enc_bits * 2)?;
+        let mut c2_assigned =
+            self.biguint
+                .assign_integer(ctx, Value::known(c2.clone()), self.enc_bits * 2)?;
+
+        c1_assigned =
+            c1_assigned.extend_limbs(n2.num_limbs() - c1_assigned.num_limbs(), zero_value);
+        c2_assigned =
+            c2_assigned.extend_limbs(n2.num_limbs() - c2_assigned.num_limbs(), zero_value);
+        let result = self.biguint.mul_mod(ctx, &c1_assigned, &c2_assigned, &n2)?;
 
         Ok(result)
     }
@@ -190,14 +199,7 @@ mod test {
             let biguint_chip = BigUintChip::construct(range, limb_bit_len);
             let paillier_chip = super::PaillierChip::construct(&biguint_chip, enc_bit_len, n, g);
 
-            let c1_assigned = biguint_chip
-                .assign_integer(ctx, Value::known(c1), enc_bit_len)
-                .unwrap();
-            let c2_assigned = biguint_chip
-                .assign_integer(ctx, Value::known(c2), enc_bit_len)
-                .unwrap();
-
-            let c_add_assigned = paillier_chip.add(ctx, &c1_assigned, &c2_assigned).unwrap();
+            let c_add_assigned = paillier_chip.add(ctx, &c1, &c2).unwrap();
 
             let res_assigned = biguint_chip
                 .assign_integer(ctx, Value::known(res.clone()), enc_bit_len * 2)

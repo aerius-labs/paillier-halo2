@@ -64,14 +64,7 @@ pub fn paillier_enc_add_test<F: BigPrimeField>(
 
     let paillier_chip = PaillierChip::construct(&biguint_chip, input.enc_bits, input.n, input.g);
 
-    let c1_assigned = biguint_chip
-        .assign_integer(ctx, Value::known(input.c1.clone()), input.enc_bits * 2)
-        .unwrap();
-    let c2_assigned = biguint_chip
-        .assign_integer(ctx, Value::known(input.c2.clone()), input.enc_bits * 2)
-        .unwrap();
-
-    let _res = paillier_chip.add(ctx, &c1_assigned, &c2_assigned).unwrap();
+    let _res = paillier_chip.add(ctx, &input.c1, &input.c2).unwrap();
 
     let res_assigned = biguint_chip
         .assign_integer(ctx, Value::known(input.res.clone()), input.enc_bits * 2)

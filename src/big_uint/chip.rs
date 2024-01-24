@@ -570,7 +570,6 @@ mod test {
 
             c_assigned.value().zip(res_assigned.value()).map(|(a, b)| {
                 assert_eq!(a, b);
-                println!("c_assigned ={:?} \n res_assigned={:?}", a, b);
             });
             chip.assert_equal_fresh(ctx, &c_assigned, &res_assigned)
                 .unwrap();
